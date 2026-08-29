@@ -109,6 +109,26 @@ def download_disclosure_external_html_payload(
     if not output_directory:
         msg = "output_directory is required"
         raise ValueError(msg)
+    cancel_token = str(body.get("cancel_token") or "").strip() or None
+    resolved_output_directory = Path(output_directory).expanduser().resolve()
+    if _is_cancelled(cancel_token):
+        _clear_cancel_token(cancel_token)
+        mode_raw = str(body.get("mode") or "").strip()
+        return {
+            "format": "kind_disclosure_external_html_download_v1",
+            **({"mode": validate_workspace_mode(mode_raw)} if mode_raw else {}),
+            "output_directory": str(resolved_output_directory),
+            "requested_count": 0,
+            "saved_count": 0,
+            "cancelled": True,
+            "acpt_numbers": [],
+            "missing_acpt_numbers": [],
+            "saved_files": [],
+            "manifest_path": str(
+                resolved_output_directory / HTML_MANIFEST_FILENAME
+            ),
+            "progress_log": ["HTML 저장 시작 전에 중단되었습니다."],
+        }
 
     source_json, _source_json_path = _load_workspace_filtered_payload(body)
 
@@ -121,10 +141,6 @@ def download_disclosure_external_html_payload(
     acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
 
-    cancel_token = str(body.get("cancel_token") or "").strip() or None
-    _clear_cancel_token(cancel_token)
-
-    resolved_output_directory = Path(output_directory).expanduser().resolve()
     if parent_mode_raw not in (None, ""):
         workspace = resolve_disclosure_workspace(body.get("data_root") or "")
         mode = validate_workspace_mode(body.get("mode"))

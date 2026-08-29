@@ -161,6 +161,9 @@ def _clean_disclosure_html_output_directory_payload(
         dry_run=dry_run,
         collect_integrity=collect_integrity,
         problem_file_limit=body.get("problem_file_limit"),
+        expected_deletion_confirmation=(
+            str(body.get("deletion_confirmation") or "").strip() or None
+        ),
     )
     deletion_candidate_count = int(summary.get("deleted_file_count") or 0)
     return with_source_context(

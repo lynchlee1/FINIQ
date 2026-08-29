@@ -197,6 +197,27 @@ def test_legacy_nested_table_row_uses_its_own_table_coordinates() -> None:
     assert result["agenda_records"][0]["evidence"]["row_index"] == 0
 
 
+def test_structured_nested_table_uses_only_its_direct_rows_and_cells() -> None:
+    result = _extract(
+        """
+        <table id="layout">
+          <tr><td>
+            <table id="agenda">
+              <tr><th>번호</th><th>회의목적사항</th></tr>
+              <tr><td>1</td><td>이사 선임의 건</td></tr>
+            </table>
+          </td></tr>
+        </table>
+        """,
+        mode="NOTICE",
+    )
+
+    assert [(row["number"], row["title"]) for row in result["agenda_records"]] == [
+        ("1", "이사 선임의 건")
+    ]
+    assert result["agenda_records"][0]["evidence"]["table_index"] == 1
+
+
 def test_correction_labels_do_not_override_the_canonical_legacy_phase() -> None:
     result = _extract(
         """

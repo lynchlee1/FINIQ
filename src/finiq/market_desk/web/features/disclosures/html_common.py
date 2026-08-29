@@ -5,6 +5,9 @@ from __future__ import annotations
 import codecs
 import hashlib
 import json
+import os
+import shutil
+import tempfile
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
@@ -603,10 +606,22 @@ def _html_output_check_workers(total_targets: int) -> int:
 
 
 def _iter_html_output_files(output_directory: Path) -> list[Path]:
-    files = [path for path in output_directory.iterdir() if path.is_file()]
-    for child in sorted(path for path in output_directory.iterdir() if path.is_dir()):
+    children = list(output_directory.iterdir())
+    symlinks = sorted(path for path in children if path.is_symlink())
+    if symlinks:
+        raise ValueError(
+            f"HTML output must not contain symbolic links: {symlinks[0]}"
+        )
+    files = [path for path in children if path.is_file()]
+    for child in sorted(path for path in children if path.is_dir()):
         if len(child.name) == 4 and child.name.isdigit():
-            files.extend(path for path in child.iterdir() if path.is_file())
+            year_children = list(child.iterdir())
+            year_symlinks = sorted(path for path in year_children if path.is_symlink())
+            if year_symlinks:
+                raise ValueError(
+                    f"HTML output must not contain symbolic links: {year_symlinks[0]}"
+                )
+            files.extend(path for path in year_children if path.is_file())
     return sorted(files)
 
 
@@ -897,6 +912,7 @@ def _validate_html_output_directory_files(
     problem_file_limit: Any = None,
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    file_inventory: list[Path] | None = None,
 ) -> dict[str, Any]:
     if not output_directory.exists():
         summary = {
@@ -917,7 +933,11 @@ def _validate_html_output_directory_files(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
-    files = _iter_html_output_files(output_directory)
+    files = (
+        _iter_html_output_files(output_directory)
+        if file_inventory is None
+        else file_inventory
+    )
     existing_paths = set(files)
     worker_count = _html_output_check_workers(len(acpt_numbers))
 
@@ -1073,6 +1093,7 @@ def _delete_unexpected_html_output_directory_files(
     dry_run: bool = False,
     collect_integrity: bool = False,
     problem_file_limit: Any = None,
+    expected_deletion_confirmation: str | None = None,
 ) -> dict[str, Any]:
     if not output_directory.exists():
         summary = {
@@ -1096,29 +1117,6 @@ def _delete_unexpected_html_output_directory_files(
         raise ValueError(msg)
 
     output_directory = output_directory.resolve()
-    if dry_run:
-        summary = _validate_html_output_directory_files(
-            output_directory,
-            acpt_numbers,
-            target_years=target_years,
-            allow_unexpected=True,
-            collect_integrity=collect_integrity,
-            problem_file_limit=problem_file_limit,
-        )
-        summary["deleted_files"] = [
-            {
-                "path": str(output_directory / filename),
-                "name": filename,
-                "reason": _describe_unexpected_html_output_file(Path(filename).name),
-            }
-            for filename in summary["unexpected_files"]
-        ]
-        summary["deleted_file_count"] = summary["unexpected_file_count"]
-        summary["deleted_file_omitted_count"] = summary[
-            "unexpected_file_omitted_count"
-        ]
-        return summary
-
     allowed_paths = {
         _target_html_path(
             output_directory,
@@ -1137,19 +1135,107 @@ def _delete_unexpected_html_output_directory_files(
         )
     parsed_problem_file_limit = _parse_problem_file_limit(problem_file_limit)
     files = _iter_html_output_files(output_directory)
-    deleted_files: list[dict[str, str]] = []
-    for path in files:
-        if path in allowed_paths:
-            continue
-        deleted_files.append(
+    deletion_candidates = [path for path in files if path not in allowed_paths]
+    deletion_records = [
+        {
+            "path": str(path),
+            "name": _relative_name(path, output_directory),
+            "reason": _describe_unexpected_html_output_file(path.name),
+        }
+        for path in deletion_candidates
+    ]
+    candidate_snapshots: list[dict[str, Any]] = []
+    for path, record in zip(deletion_candidates, deletion_records, strict=True):
+        stat = path.lstat()
+        candidate_snapshots.append(
             {
-                "path": str(path),
-                "name": _relative_name(path, output_directory),
-                "reason": _describe_unexpected_html_output_file(path.name),
+                "name": record["name"],
+                "size": stat.st_size,
+                "mtime_ns": stat.st_mtime_ns,
+                "device": stat.st_dev,
+                "inode": stat.st_ino,
             }
         )
-        if not dry_run:
-            path.unlink()
+    confirmation_payload = {
+        "output_directory": str(output_directory),
+        "targets": [
+            {"acpt_no": acpt_no, "year": target_years[acpt_no]}
+            for acpt_no in acpt_numbers
+        ],
+        "candidates": candidate_snapshots,
+    }
+    deletion_confirmation = hashlib.sha256(
+        json.dumps(
+            confirmation_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if not dry_run and deletion_candidates:
+        if not expected_deletion_confirmation:
+            raise ValueError("deletion_confirmation is required")
+        if expected_deletion_confirmation != deletion_confirmation:
+            raise ValueError(
+                "HTML deletion candidates changed after inspection; inspect again"
+            )
+        quarantine_root = Path(
+            tempfile.mkdtemp(
+                dir=output_directory,
+                prefix=".finiq-html-delete-",
+            )
+        )
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for index, (path, snapshot) in enumerate(
+                zip(deletion_candidates, candidate_snapshots, strict=True)
+            ):
+                if path.is_symlink():
+                    raise ValueError(
+                        "HTML deletion candidates changed after inspection; inspect again"
+                    )
+                stat = path.lstat()
+                if any(
+                    getattr(stat, field) != snapshot[key]
+                    for field, key in (
+                        ("st_size", "size"),
+                        ("st_mtime_ns", "mtime_ns"),
+                        ("st_dev", "device"),
+                        ("st_ino", "inode"),
+                    )
+                ):
+                    raise ValueError(
+                        "HTML deletion candidates changed after inspection; inspect again"
+                    )
+                quarantined = quarantine_root / str(index)
+                os.replace(path, quarantined)
+                moved.append((path, quarantined))
+                moved_stat = quarantined.lstat()
+                if (
+                    moved_stat.st_dev != snapshot["device"]
+                    or moved_stat.st_ino != snapshot["inode"]
+                ):
+                    raise ValueError(
+                        "HTML deletion candidates changed after inspection; inspect again"
+                    )
+        except Exception as error:
+            restore_failures: list[Path] = []
+            for original, quarantined in reversed(moved):
+                if quarantined.exists() and not original.exists():
+                    try:
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(quarantined, original)
+                    except OSError:
+                        restore_failures.append(quarantined)
+            if restore_failures:
+                raise RuntimeError(
+                    "HTML cleanup rollback failed; quarantined files were preserved at "
+                    f"{quarantine_root}"
+                ) from error
+            shutil.rmtree(quarantine_root)
+            raise
+        else:
+            shutil.rmtree(quarantine_root)
 
     summary = _validate_html_output_directory_files(
         output_directory,
@@ -1158,13 +1244,15 @@ def _delete_unexpected_html_output_directory_files(
         allow_unexpected=dry_run,
         collect_integrity=collect_integrity,
         problem_file_limit=problem_file_limit,
+        file_inventory=files if dry_run else None,
     )
-    summary["deleted_files"] = deleted_files[:parsed_problem_file_limit]
-    summary["deleted_file_count"] = len(deleted_files)
+    summary["deleted_files"] = deletion_records[:parsed_problem_file_limit]
+    summary["deleted_file_count"] = len(deletion_records)
     summary["deleted_file_omitted_count"] = max(
-        len(deleted_files) - parsed_problem_file_limit,
+        len(deletion_records) - parsed_problem_file_limit,
         0,
     )
+    summary["deletion_confirmation"] = deletion_confirmation
     return summary
 
 

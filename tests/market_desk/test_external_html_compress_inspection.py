@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from finiq.market_desk.web.app import app
+from finiq.market_desk.web.features.disclosures import external_html_compress
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
 )
@@ -120,6 +121,40 @@ def test_external_html_compression_uses_requested_progress_interval(
     )
 
     assert "외부 HTML 압축 중간 확인: 1/1건 처리." in progress_log
+
+
+def test_external_html_compression_cancel_preserves_existing_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    output_directory = Path(str(payload["output_directory"]))
+    output_directory.mkdir(parents=True)
+    output_path = output_directory / "compressed-external-html.json"
+    output_path.write_text('{"existing": true}', encoding="utf-8")
+    processed = False
+    original_compress = external_html_compress._compress_external_html_file
+
+    def tracked_compress(args):
+        nonlocal processed
+        result = original_compress(args)
+        processed = True
+        return result
+
+    monkeypatch.setattr(
+        external_html_compress,
+        "_compress_external_html_file",
+        tracked_compress,
+    )
+
+    with pytest.raises(InterruptedError, match="compression cancelled"):
+        compress_disclosure_external_html_payload(
+            payload,
+            cancel_check=lambda: processed,
+        )
+
+    assert output_path.read_text(encoding="utf-8") == '{"existing": true}'
+    assert not list(output_directory.parent.glob(".finiq-external-html-compress-*"))
 
 
 def test_external_html_compression_does_not_fall_back_to_input_directory(
@@ -320,12 +355,14 @@ def test_rebuild_invalid_compression_stops_before_next_mode_when_cancelled(
             {"mode": "rights_issuance", "repairable": True},
         ],
     }
-    calls: list[str] = []
+    calls: list[dict[str, object]] = []
     cancelled = False
+    supplied_cancel_check = None
 
-    def fake_compress(body, progress_callback=None):
-        nonlocal cancelled
-        calls.append(str(body["mode"]))
+    def fake_compress(body, progress_callback=None, cancel_check=None):
+        nonlocal cancelled, supplied_cancel_check
+        calls.append(body)
+        supplied_cancel_check = cancel_check
         cancelled = True
         return {"format": "fake"}
 
@@ -339,11 +376,17 @@ def test_rebuild_invalid_compression_stops_before_next_mode_when_cancelled(
     )
 
     result = rebuild_invalid_disclosure_external_html_compress_payload(
-        {"data_root": str(tmp_path / "workspace")},
+        {
+            "data_root": str(tmp_path / "workspace"),
+            "progress_interval": 7,
+        },
         cancel_check=lambda: cancelled,
     )
 
-    assert calls == ["bond_issuance"]
+    assert [call["mode"] for call in calls] == ["bond_issuance"]
+    assert calls[0]["progress_interval"] == 7
+    assert supplied_cancel_check is not None
+    assert supplied_cancel_check() is True
     assert result["cancelled"] is True
     assert result["passed"] is False
     assert result["verification"] is inspection

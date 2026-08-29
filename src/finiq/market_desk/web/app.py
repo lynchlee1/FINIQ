@@ -242,6 +242,8 @@ def _run_job_worker(job_id: str, kind: str, payload: dict[str, Any]):
                 "다른 KIND 네트워크 작업이 끝날 때까지 대기합니다."
             )
             with KIND_NETWORK_JOB_LOCK:
+                if job_manager.is_cancelled(job_id):
+                    return
                 progress_callback(
                     "KIND 네트워크 작업 대기 완료: "
                     f"{time.monotonic() - network_wait_started_at:.1f}초. "

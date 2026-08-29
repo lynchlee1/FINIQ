@@ -185,7 +185,7 @@ export function HtmlSectionSplitResults({
         size="sm"
         className="h-8"
         onClick={() => onChangeReviewView("sections")}
-        disabled={!selectedDocument}
+        disabled={!selectedDocument || Boolean(selectedDocument.source_unavailable)}
       >
         목차별 보기
       </Button>

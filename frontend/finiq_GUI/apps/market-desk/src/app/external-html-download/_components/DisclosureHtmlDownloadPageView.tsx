@@ -359,19 +359,21 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     mode: selectedFilterMode,
     ...(selectedFilterParentMode ? { parent_mode: selectedFilterParentMode } : {}),
     output_directory: "",
-    limit: limit ? Number(limit) : null,
     ...(parsedProblemFileLimit != null ? { problem_file_limit: parsedProblemFileLimit } : {}),
     dry_run: dryRun,
     delete_confirmed: deleteConfirmed,
     delete_confirmation_text: deleteConfirmationText,
+    ...(!dryRun && lastInspectionResult?.deletion_confirmation
+      ? { deletion_confirmation: lastInspectionResult.deletion_confirmation }
+      : {}),
   }), [
     dataRoot,
     selectedFilterMode,
     selectedFilterParentMode,
-    limit,
     parsedProblemFileLimit,
     deleteConfirmed,
     deleteConfirmationText,
+    lastInspectionResult,
   ]);
 
   useEffect(() => {
@@ -399,6 +401,8 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     setExistingData(selectedResult || null);
     setLastInspectionResult(selectedResult || null);
     setLastInspectionCandidateCount(selectedResult?.deletion_candidate_count || 0);
+    setDeleteConfirmed(false);
+    setDeleteConfirmationText("");
   }, [allModeSaveInspectionData, selectedFilterId]);
 
   useEffect(() => {
@@ -580,6 +584,11 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       setIsErrorStatus(true);
       return;
     }
+    if (!lastInspectionResult?.deletion_confirmation) {
+      setStatus("삭제 후보를 다시 검사하세요.");
+      setIsErrorStatus(true);
+      return;
+    }
     if (inspectAbortControllerRef.current) {
       inspectAbortControllerRef.current.abort();
       inspectAbortControllerRef.current = null;
@@ -634,11 +643,22 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     if (!activeCancelToken && !activeJobId) return;
     setStatus(variantConfig.stopMessage);
     try {
-      await fetch(activeCancelToken ? variantConfig.cancelEndpoint : "/api/utility/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activeCancelToken ? { cancel_token: activeCancelToken } : { job_id: activeJobId }),
-      });
+      const cancelRequests: Promise<Response>[] = [];
+      if (activeCancelToken) {
+        cancelRequests.push(fetch(variantConfig.cancelEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cancel_token: activeCancelToken }),
+        }));
+      }
+      if (activeJobId) {
+        cancelRequests.push(fetch("/api/utility/cancel", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ job_id: activeJobId }),
+        }));
+      }
+      await Promise.all(cancelRequests);
     } catch (err: any) {
       setStatus(err.message);
       setIsErrorStatus(true);

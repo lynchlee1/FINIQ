@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from typing import Any, Callable
 from finiq.concurrency import resolve_worker_count
 from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
+from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.web.features.market_data.service_sources import (
     _load_sqlite_manifest,
     _parse_source_body_page_file,
@@ -713,6 +715,62 @@ def _write_manifest(manifest_path: Path, payload: dict[str, Any]) -> None:
     temporary_path.replace(manifest_path)
 
 
+@sqlite_generation_locked
+def _publish_sqlite_generation(
+    *,
+    manifest_path: Path,
+    staged_root: Path,
+    shards: list[dict[str, Any]],
+) -> None:
+    shard_root = manifest_path.parent
+    shard_names = [str(shard.get("relative_path") or "") for shard in shards]
+    if any(
+        not name or Path(name).name != name or not name.endswith(".sqlite")
+        for name in shard_names
+    ):
+        raise ValueError("staged SQLite shard paths must be SQLite file names")
+    staged_manifest = staged_root / MANIFEST_FILENAME
+    staged_shards = [staged_root / name for name in shard_names]
+    if not staged_manifest.is_file() or any(
+        not path.is_file() for path in staged_shards
+    ):
+        raise ValueError("staged SQLite generation is incomplete")
+
+    previous_paths = sorted(
+        path
+        for path in shard_root.glob("[0-9][0-9][0-9][0-9].sqlite")
+        if path.is_file()
+    )
+    if manifest_path.is_file():
+        previous_paths.append(manifest_path)
+
+    with tempfile.TemporaryDirectory(
+        dir=shard_root,
+        prefix=".finiq-table-backup-",
+    ) as backup_raw:
+        backup_root = Path(backup_raw)
+        moved_previous: list[tuple[Path, Path]] = []
+        published: list[Path] = []
+        try:
+            for previous in previous_paths:
+                backup = backup_root / previous.name
+                os.replace(previous, backup)
+                moved_previous.append((previous, backup))
+            for staged in staged_shards:
+                target = shard_root / staged.name
+                os.replace(staged, target)
+                published.append(target)
+            os.replace(staged_manifest, manifest_path)
+            published.append(manifest_path)
+        except Exception:
+            for target in reversed(published):
+                target.unlink(missing_ok=True)
+            for target, backup in reversed(moved_previous):
+                if backup.exists():
+                    os.replace(backup, target)
+            raise
+
+
 def _raise_if_cancelled(cancel_check: Callable[[], bool] | None) -> None:
     if cancel_check and cancel_check():
         raise RuntimeError("Job cancelled")
@@ -878,42 +936,54 @@ def build_disclosure_table_payload(
         )
 
     shard_started_at = time.monotonic()
-    shards = _write_sqlite_shards(
-        rows_by_year=rows_by_year,
-        shard_root=shard_root,
-        source_path=source_path,
-        source_type=source_type,
-        table_name=table_name,
-        worker_count=shard_workers,
-        progress_callback=progress_callback,
-        cancel_check=cancel_check,
-    )
-
-    _raise_if_cancelled(cancel_check)
-    if progress_callback:
-        progress_callback(
-            f"SQLite 파일 생성 완료: {time.monotonic() - shard_started_at:.1f}초. "
-            "변환 기록 파일을 저장합니다..."
+    shard_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        dir=shard_root,
+        prefix=".finiq-table-build-",
+    ) as staged_raw:
+        staged_root = Path(staged_raw)
+        shards = _write_sqlite_shards(
+            rows_by_year=rows_by_year,
+            shard_root=staged_root,
+            source_path=source_path,
+            source_type=source_type,
+            table_name=table_name,
+            worker_count=shard_workers,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
         )
 
-    manifest = {
-        "format": MANIFEST_FORMAT,
-        "schema_version": TABLE_SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "source_type": source_type,
-        "table_name": table_name,
-        "summary": {
-            "companies": companies,
-            "source_rows": source_row_count,
-            "duplicate_rows": duplicate_row_count,
-            "disclosures": row_count,
-            "unlinked_disclosures": unlinked_disclosure_count,
-            "shards": len(shards),
-        },
-        "pages": pages,
-        "shards": shards,
-    }
-    _write_manifest(manifest_path, manifest)
+        _raise_if_cancelled(cancel_check)
+        if progress_callback:
+            progress_callback(
+                f"SQLite 파일 생성 완료: {time.monotonic() - shard_started_at:.1f}초. "
+                "변환 기록 파일을 저장합니다..."
+            )
+
+        manifest = {
+            "format": MANIFEST_FORMAT,
+            "schema_version": TABLE_SCHEMA_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "source_type": source_type,
+            "table_name": table_name,
+            "summary": {
+                "companies": companies,
+                "source_rows": source_row_count,
+                "duplicate_rows": duplicate_row_count,
+                "disclosures": row_count,
+                "unlinked_disclosures": unlinked_disclosure_count,
+                "shards": len(shards),
+            },
+            "pages": pages,
+            "shards": shards,
+        }
+        _write_manifest(staged_root / MANIFEST_FILENAME, manifest)
+        _raise_if_cancelled(cancel_check)
+        _publish_sqlite_generation(
+            manifest_path=manifest_path,
+            staged_root=staged_root,
+            shards=shards,
+        )
     return {
         "format": "finiq_disclosure_table_build_v1",
         "manifest_format": MANIFEST_FORMAT,
@@ -941,6 +1011,7 @@ def build_disclosure_table_payload(
     }
 
 
+@sqlite_generation_locked
 def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Compare the current source pages, manifest, and SQLite shard contents."""
     root_directory = str(body.get("root_directory") or "").strip()

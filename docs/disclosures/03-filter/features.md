@@ -144,6 +144,8 @@ filter가 정의하는 mode 폴더의 `filter.json`에는 조건, 실행 상태�
 - 일반 실행 오류는 기존 완료·중단 결과를 유지한 채 `failed` 상태와 오류를 기록한다.
 - 진행 단위나 숫자가 없거나 형식이 다르면 실패 처리한다.
 - `filter.json`과 `filtered.json`에는 SQLite manifest나 filter JSON의 절대 경로를 기록하지 않는다.
+- `filter.json`과 결과·대기 sidecar는 하나의 transaction 기록 아래 함께 게시한다. 게시가 중간에 끊긴 transaction은 다음 첫 읽기에서 기존 파일 묶음으로 복구한 뒤 복구된 문서를 다시 읽는다.
+- 전체 검사는 한 파생 필터의 stale·orphan 오류에서 멈추지 않고 각 파생 필터의 상태를 독립적으로 보고한다.
 
 ### Share Filter Workflows in the UI
 

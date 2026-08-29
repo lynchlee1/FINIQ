@@ -87,6 +87,9 @@ const describeFilterInspectionIssue = (preset: DisclosureConditionPreset) => {
   const folder = presetLabel(preset);
   const query = preset.steps.database_query;
   const record = preset.steps.record;
+  if (preset.parent_error?.trim()) {
+    return `${folder}: ${preset.parent_error.trim()}`;
+  }
   if (preset.status === "failed") {
     const failedStep = query.status === "failed" ? query : record;
     const error = failedStep.error?.trim();

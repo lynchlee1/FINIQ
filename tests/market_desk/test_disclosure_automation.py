@@ -188,6 +188,65 @@ def test_automation_stage_paths_use_linked_stage_directories(tmp_path: Path) -> 
     )
 
 
+def test_stage_one_only_automation_ignores_disabled_broken_stage_link(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "workspace"
+    converted_stage = data_root / "07-converted"
+    converted_stage.mkdir(parents=True)
+    (converted_stage / "finiq-stage-link.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": str(tmp_path / "missing-target"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = _profile(data_root)
+    payload["steps"] = {
+        "s1_download": True,
+        "s2_table": False,
+        "s3_filter": False,
+        "s4_external_html_download": False,
+        "s5_internal_html_download": False,
+        "s6_sections": False,
+        "s7_parse": False,
+    }
+    payload["execution_mask"] = [1]
+    profile = normalize_automation_profile(payload)
+    disabled_checkpoint = _checkpoint_path(profile, 7)
+    disabled_checkpoint.parent.mkdir(parents=True)
+    disabled_checkpoint.write_text(
+        json.dumps(
+            {
+                "format": AUTOMATION_CHECKPOINT_FORMAT,
+                "stage": 7,
+                "status": "succeeded",
+                "config_hash": _stage_config_hash(profile, 7),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        automation,
+        "_run_stage",
+        lambda stage, *_args, **_kwargs: {
+            "summary": {"stage": stage},
+        },
+    )
+
+    result = run_disclosure_automation_payload(payload)
+
+    assert result["workflow_status"] == "completed"
+    assert result["stages"][0]["status"] == "succeeded"
+    assert all(item["status"] == "disabled" for item in result["stages"][1:])
+    assert not (tmp_path / "missing-target").exists()
+
+
 def test_resume_reuses_valid_stage_checkpoints_when_stage_one_is_not_selected(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1304,6 +1363,7 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
         )
 
     existing_before_download: list[list[Path]] = []
+    compression_cancel_checks: list[object] = []
 
     def fake_download(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         source = json.loads(
@@ -1335,6 +1395,7 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
 
     def fake_compress(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
         assert body["progress_interval"] == profile["execution"]["progress_interval"]
+        compression_cancel_checks.append(_kwargs.get("cancel_check"))
         directory = Path(str(body["input_directory"]))
         records = [
                 {
@@ -1399,6 +1460,8 @@ def test_stage_four_rebuilds_active_membership_without_reusing_html(
         "20260712000001"
     ]
     assert existing_before_download == [[], []]
+    assert len(compression_cancel_checks) == 2
+    assert all(callable(check) for check in compression_cancel_checks)
 
 
 def test_stage_five_rebuilds_internal_html_without_reusing_current(
@@ -1630,8 +1693,9 @@ def test_stage_six_rejects_source_without_sections(
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
     stage_five_output = _stage_output_paths(profile, 5)[0]
-    stage_five_output.mkdir(parents=True)
-    (stage_five_output / "20260101000001.html").write_text(
+    source_directory = stage_five_output / "2026"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260101000001.html").write_text(
         "<html><head></head><body><p>no structural toc</p></body></html>",
         encoding="utf-8",
     )

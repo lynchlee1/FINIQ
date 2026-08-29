@@ -669,6 +669,25 @@ def download_disclosure_internal_html_payload(
     if not output_directory:
         msg = "output_directory is required"
         raise ValueError(msg)
+    cancel_token = str(body.get("cancel_token") or "").strip() or None
+    resolved_output_directory = Path(output_directory).expanduser().resolve()
+    if _is_cancelled(cancel_token):
+        _clear_cancel_token(cancel_token)
+        return {
+            "format": "kind_disclosure_internal_html_download_v1",
+            "output_directory": str(resolved_output_directory),
+            "requested_count": 0,
+            "saved_count": 0,
+            "source_unavailable_count": 0,
+            "source_unavailable_acpt_numbers": [],
+            "cancelled": True,
+            "acpt_numbers": [],
+            "saved_files": [],
+            "manifest_path": str(
+                resolved_output_directory / HTML_MANIFEST_FILENAME
+            ),
+            "progress_log": ["HTML 내부 저장 시작 전에 중단되었습니다."],
+        }
 
     if "source_directory" in body:
         msg = "source_directory is not supported; use source_compressed_json_path"
@@ -783,10 +802,6 @@ def download_disclosure_internal_html_payload(
         target["acpt_no"]: target["year"]
         for target in targets
     }
-    cancel_token = str(body.get("cancel_token") or "").strip() or None
-    _clear_cancel_token(cancel_token)
-
-    resolved_output_directory = Path(output_directory).expanduser().resolve()
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
     max_workers = resolve_worker_count(
         body.get("max_workers"),

@@ -194,6 +194,7 @@ export type DisclosureConditionPreset = {
   mode: string;
   parent_mode?: string;
   parent_result_fingerprint?: string;
+  parent_error?: string;
   condition_blocks: DisclosureConditionBlock[];
   status: "ready" | "running" | "interrupted" | "completed" | "failed";
   steps: {

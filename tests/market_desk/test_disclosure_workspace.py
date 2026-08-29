@@ -1127,6 +1127,11 @@ def test_workspace_prepare_preserves_existing_modes(tmp_path: Path) -> None:
         "bond_issuance",
         "rights_issuance",
     }
+    assert result["paths"]["sections_root"] == str(data_root / "06-sections")
+    assert set(result["paths"]["sections"]) == {
+        "bond_issuance",
+        "rights_issuance",
+    }
     assert set(result["paths"]["converted"]) == {
         "bond_issuance",
         "rights_issuance",
@@ -1522,6 +1527,39 @@ def test_config_api_returns_saved_stage_paths(
     assert {key: response.json()[key] for key in expected} == {
         key: str(tmp_path / "legacy" / key) for key in expected
     }
+
+
+def test_config_api_loads_when_sections_stage_link_is_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "resources"
+    sections_stage = data_root / "06-sections"
+    sections_stage.mkdir(parents=True)
+    (sections_stage / STAGE_LINK_FILENAME).write_text(
+        json.dumps(
+            {
+                "format": "finiq_stage_link_v1",
+                "schema_version": 1,
+                "target_workspace": str(tmp_path / "missing-target"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app_config, "output_root", str(data_root))
+    monkeypatch.setattr(app_config, "html_parse_mode", "bond_issuance")
+    monkeypatch.setattr(
+        app_config,
+        "html_section_split_output_directory",
+        str(sections_stage),
+    )
+
+    response = TestClient(app).get("/api/config")
+
+    assert response.status_code == 200
+    assert response.json()["html_section_split_output_directory"] == str(
+        sections_stage / "bond_issuance"
+    )
 
 
 def test_config_api_prefers_linked_stage_over_saved_paths(

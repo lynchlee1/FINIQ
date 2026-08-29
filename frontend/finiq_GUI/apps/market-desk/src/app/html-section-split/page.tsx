@@ -318,10 +318,17 @@ export default function HtmlSectionSplitPage() {
     resetSelectedDisclosure();
   };
 
-  const handleFilterChange = (value: string) => {
+  const handleFilterChange = async (value: string) => {
     handleFilterInputChange(value);
     const preset = filterPresets.find((item) => presetIdentity(item) === value);
-    if (preset && !preset.parent_mode) void saveSetting("html_parse_mode", preset.mode);
+    if (preset && !preset.parent_mode) {
+      const saved = await saveSetting("html_parse_mode", preset.mode);
+      if (saved) {
+        const settings = useSettingsStore.getState();
+        setInputDirectory(settings.internal_html_output_directory || "");
+        setOutputDirectory(settings.html_section_split_output_directory || "");
+      }
+    }
   };
 
   const handleOutputDirectoryChange = (value: string) => {
@@ -582,7 +589,9 @@ export default function HtmlSectionSplitPage() {
 
   const openDocument = (document: DocumentRow, view: ReviewView) => {
     selectDocument(document, view);
-    void splitDocument(document);
+    if (!document.source_unavailable) {
+      void splitDocument(document);
+    }
   };
 
   const handleViewSource = (document: DocumentRow) => {

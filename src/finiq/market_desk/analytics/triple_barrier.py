@@ -13,6 +13,7 @@ from typing import Any
 import pandas as pd
 import pyarrow.parquet as pq
 
+from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.analytics.ontology_graph import (
     DEFAULT_KIND_MANIFEST_PATH,
     DEFAULT_QUANTIWISE_PARQUET_DIR,
@@ -574,6 +575,7 @@ def result_to_dict(row: TripleBarrierResult) -> dict[str, Any]:
     }
 
 
+@sqlite_generation_locked
 def run_triple_barrier_analysis(
     *,
     manifest_path: str | Path | None = None,
@@ -624,6 +626,7 @@ def run_triple_barrier_analysis(
     }
 
 
+@sqlite_generation_locked
 def get_triple_barrier_results_payload(
     *,
     manifest_path: str | Path | None = None,

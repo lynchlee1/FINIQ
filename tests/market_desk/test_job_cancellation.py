@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import threading
 import time
 import pytest
 import pandas as pd
 from pathlib import Path
 from fastapi.testclient import TestClient
 
+import finiq.market_desk.web.app as web_app
 from finiq.market_desk.web.app import app, _run_job_worker
 from finiq.market_desk.web.jobs import JobManager, job_manager
 from finiq.data.assets_excel import (
@@ -105,6 +107,40 @@ def test_queued_cancel_race_condition():
     
     assert job_manager.get_job(job_id).status == "cancelled"
     assert job_manager.get_job(job_id).error is None
+
+
+def test_network_job_cancelled_while_waiting_never_calls_handler(monkeypatch):
+    job_id = "network-wait-cancel-test"
+    handler_called = False
+
+    def handler(_payload, progress_callback=None, cancel_check=None):
+        nonlocal handler_called
+        handler_called = True
+        return {}
+
+    monkeypatch.setitem(web_app.JOB_HANDLERS, "external_html_download", handler)
+    job_manager.create_job(job_id, "external_html_download")
+    web_app.KIND_NETWORK_JOB_LOCK.acquire()
+    worker = None
+    try:
+        worker = threading.Thread(
+            target=_run_job_worker,
+            args=(job_id, "external_html_download", {}),
+        )
+        worker.start()
+        deadline = time.monotonic() + 2
+        while job_manager.get_job(job_id).status != "running":
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        job_manager.cancel_job(job_id)
+    finally:
+        web_app.KIND_NETWORK_JOB_LOCK.release()
+    assert worker is not None
+    worker.join(timeout=2)
+
+    assert not worker.is_alive()
+    assert handler_called is False
+    assert job_manager.get_job(job_id).status == "cancelled"
 
 def test_assets_excel_cancel_callback_abort(tmp_path):
     source_dir = tmp_path / "assets"

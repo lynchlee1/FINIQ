@@ -24,6 +24,7 @@ from finiq.data_scraper.core.client import _is_valid_html
 from finiq.data_scraper.core.kind_computers import normalize_kind_proxy_urls
 from finiq.data_scraper.parse import disclosure_file_rows, pagination_info
 from finiq.data_scraper.workflow import inspect_download_directory_pages
+from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 
 from finiq.market_desk.web.features.disclosures.internal_html_download import (
     _collect_internal_targets_from_compressed_payload,
@@ -91,7 +92,6 @@ from finiq.market_desk.web.features.market_data.service_sources import (
 from .layout import (
     DisclosureWorkspace,
     atomic_write_json,
-    prepare_disclosure_workspace_payload,
     resolve_disclosure_workspace,
     validate_workspace_mode,
 )
@@ -323,6 +323,36 @@ def _sections_mode_directory(profile: dict[str, Any]) -> Path:
     )
 
 
+def _prepare_automation_output_directories(
+    profile: dict[str, Any],
+    stages: list[dict[str, Any]],
+) -> None:
+    workspace = _profile_workspace(profile)
+    mode = validate_workspace_mode(profile["execution"]["mode"])
+    for stage_plan in stages:
+        if stage_plan["plan_action"] != "process":
+            continue
+        stage = int(stage_plan["stage"])
+        if stage == 1:
+            directory = workspace.list
+        elif stage == 2:
+            directory = workspace.table
+        elif stage == 3:
+            directory = workspace.filtered / mode
+        elif stage == 4:
+            workspace.external_mode(mode).mkdir(parents=True, exist_ok=True)
+            directory = workspace.external_compress_mode(mode)
+        elif stage == 5:
+            directory = workspace.internal_mode(mode)
+        elif stage == 6:
+            directory = workspace.sections_mode(mode)
+        elif stage == 7:
+            directory = workspace.converted_mode(mode)
+        else:
+            raise ValueError(f"unsupported stage: {stage}")
+        directory.mkdir(parents=True, exist_ok=True)
+
+
 def _checkpoint_path(profile: dict[str, Any], stage: int) -> Path:
     return _automation_root(profile) / "checkpoints" / f"stage-{stage}.json"
 
@@ -347,24 +377,28 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
 def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
     workspace = _profile_workspace(profile)
     mode = profile["execution"]["mode"]
+    if stage == 1:
+        return [workspace.list / ".automation-windows"]
+    if stage == 2:
+        return [workspace.table]
     if stage == 3:
         return [
             filter_workflow_path(workspace.root, mode),
             workspace.filtered / mode / "filtered.json",
         ]
-    paths = {
-        1: [workspace.list / ".automation-windows"],
-        2: [workspace.table],
-        4: [
+    if stage == 4:
+        return [
             _external_compress_mode_directory(profile)
             / "compressed-external-html.json",
             _external_mode_directory(profile) / ".automation-current",
-        ],
-        5: [_internal_mode_directory(profile) / ".automation-current"],
-        6: [_sections_mode_directory(profile) / ".automation-current"],
-        7: [workspace.converted / mode / f"parsed-{mode}.json"],
-    }
-    return paths[stage]
+        ]
+    if stage == 5:
+        return [_internal_mode_directory(profile) / ".automation-current"]
+    if stage == 6:
+        return [_sections_mode_directory(profile) / ".automation-current"]
+    if stage == 7:
+        return [workspace.converted / mode / f"parsed-{mode}.json"]
+    raise ValueError(f"unsupported stage: {stage}")
 
 
 def _stage_output_fingerprint(profile: dict[str, Any], stage: int) -> str:
@@ -661,6 +695,7 @@ def _html_inspection_details(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@sqlite_generation_locked
 def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
     manifest_path = _table_manifest(profile)
@@ -712,6 +747,7 @@ def _inspect_detail_table(profile: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+@sqlite_generation_locked
 def _inspect_detail_filter(profile: dict[str, Any]) -> dict[str, Any]:
     root = Path(profile["data_root"])
     output_path = _filter_result_path(profile)
@@ -1137,7 +1173,7 @@ def build_automation_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
     stages: list[dict[str, Any]] = []
     for stage in STAGE_NUMBERS:
         enabled = profile["steps"][STAGE_KEYS[stage]]
-        checkpoint = _load_valid_checkpoint(profile, stage)
+        checkpoint = _load_valid_checkpoint(profile, stage) if enabled else None
         checkpoint_valid = checkpoint is not None
         if not enabled:
             action = "disabled"
@@ -1883,6 +1919,7 @@ def _run_stage(
                         "progress_interval": execution["progress_interval"],
                     },
                     progress_callback=progress_callback,
+                    cancel_check=cancel_check,
                 )
                 if not (
                     external_html_compress_result.get("verification") or {}
@@ -2097,12 +2134,7 @@ def run_disclosure_automation_payload(
         raise ValueError("실행 계획이 차단되었습니다. " + " / ".join(reasons))
     profile = plan["profile"]
     trigger = plan["trigger"]
-    prepare_disclosure_workspace_payload(
-        {
-            "data_root": profile["data_root"],
-            "modes": [profile["execution"]["mode"]],
-        }
-    )
+    _prepare_automation_output_directories(profile, plan["stages"])
 
     def emit(message: str) -> None:
         if progress_callback is not None:

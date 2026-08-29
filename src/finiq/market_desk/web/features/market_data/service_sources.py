@@ -8,6 +8,7 @@ from finiq.data_scraper.parse import (
     pagination_info,
 )
 from finiq.data_scraper.storage.result_files import result_page_number
+from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.web.features.market_data.service_records import *
 
 

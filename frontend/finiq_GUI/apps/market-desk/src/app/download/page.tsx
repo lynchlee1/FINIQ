@@ -420,12 +420,7 @@ export default function DownloadPage() {
   useEffect(() => () => {
     metadataInspectionAbortControllerRef.current?.abort();
     fileInspectionStartAbortControllerRef.current?.abort();
-    const activeInspection = activeInspectionRef.current;
-    if (activeInspection?.jobId) {
-      void cancelDownload(activeInspection.jobId).catch(() => undefined);
-    }
-    clearActiveInspection(activeInspection);
-  }, [clearActiveInspection]);
+  }, []);
 
   useEffect(() => {
     clearCleanupCandidates();

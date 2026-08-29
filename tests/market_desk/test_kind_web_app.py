@@ -1466,6 +1466,120 @@ def test_completed_filter_result_is_split_from_workflow_metadata(tmp_path: Path)
     )
 
 
+def test_filter_result_and_workflow_remain_unchanged_when_staging_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20260101000001", "title": "old"}],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    result_path = workflow_path.with_name("filtered.json")
+    old_workflow = workflow_path.read_bytes()
+    old_result = result_path.read_bytes()
+    document, _workflow = filter_presets._read_workflow(workflow_path)
+    next_result = json.loads(json.dumps(document["result"]))
+    next_result["disclosures"][0]["title"] = "new"
+    filter_presets._set_workflow_result(document, next_result)
+    original_write = filter_presets.atomic_write_json
+
+    def fail_workflow_stage(path: Path, payload: dict[str, object]) -> None:
+        if path.name.startswith(".filter.json.staged-"):
+            raise OSError("simulated workflow staging failure")
+        original_write(path, payload)
+
+    monkeypatch.setattr(filter_presets, "atomic_write_json", fail_workflow_stage)
+
+    with pytest.raises(OSError, match="workflow staging failure"):
+        filter_presets._write_workflow(workflow_path, document)
+
+    assert workflow_path.read_bytes() == old_workflow
+    assert result_path.read_bytes() == old_result
+    assert not filter_presets._workflow_transaction_path(workflow_path).exists()
+
+
+def test_filter_result_publish_rolls_back_when_workflow_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20260101000001", "title": "old"}],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    result_path = workflow_path.with_name("filtered.json")
+    old_workflow = workflow_path.read_bytes()
+    old_result = result_path.read_bytes()
+    document, _workflow = filter_presets._read_workflow(workflow_path)
+    next_result = json.loads(json.dumps(document["result"]))
+    next_result["disclosures"][0]["title"] = "new"
+    filter_presets._set_workflow_result(document, next_result)
+    original_replace = filter_presets.os.replace
+
+    def fail_workflow_publish(source: Path, target: Path) -> None:
+        if Path(source).name.startswith(".filter.json.staged-"):
+            raise OSError("simulated workflow publish failure")
+        original_replace(source, target)
+
+    monkeypatch.setattr(filter_presets.os, "replace", fail_workflow_publish)
+
+    with pytest.raises(OSError, match="workflow publish failure"):
+        filter_presets._write_workflow(workflow_path, document)
+
+    assert workflow_path.read_bytes() == old_workflow
+    assert result_path.read_bytes() == old_result
+    assert not filter_presets._workflow_transaction_path(workflow_path).exists()
+
+
+def test_filter_inspection_rereads_workflow_after_transaction_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20260101000001", "title": "old"}],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    result_path = workflow_path.with_name("filtered.json")
+    old_workflow = workflow_path.read_bytes()
+    old_result = result_path.read_bytes()
+    document, _workflow = filter_presets._read_workflow(workflow_path)
+    next_result = json.loads(json.dumps(document["result"]))
+    next_result["disclosures"][0]["title"] = "new"
+    filter_presets._set_workflow_result(document, next_result)
+    transaction_path = filter_presets._workflow_transaction_path(workflow_path)
+    original_unlink = Path.unlink
+
+    def interrupt_after_publish(path: Path, *args, **kwargs) -> None:
+        if path == transaction_path:
+            raise OSError("simulated interruption after publish")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", interrupt_after_publish)
+    with pytest.raises(OSError, match="interruption after publish"):
+        filter_presets._write_workflow(workflow_path, document)
+    monkeypatch.setattr(Path, "unlink", original_unlink)
+
+    inspected = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "inspect"}
+    )
+
+    assert inspected["presets"][0]["status"] == "completed"
+    assert workflow_path.read_bytes() == old_workflow
+    assert result_path.read_bytes() == old_result
+    assert not transaction_path.exists()
+
+
 def test_filter_list_does_not_read_split_result_sidecar(
     tmp_path: Path,
     monkeypatch,
@@ -1832,10 +1946,18 @@ def test_derived_filter_rejects_missing_incomplete_and_stale_parent(
     )
     assert stale_child["status"] == "failed"
     assert "stale because parent result changed" in stale_child["parent_error"]
-    with pytest.raises(ValueError, match="stale because parent result changed"):
-        filter_presets.manage_filter_presets_payload(
-            {"data_root": str(data_root), "action": "inspect"}
-        )
+    inspected = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "inspect"}
+    )
+    inspected_parent = next(
+        item for item in inspected["presets"] if item["id"] == "parent"
+    )
+    inspected_child = next(
+        item for item in inspected["presets"] if item["id"] == "parent/child"
+    )
+    assert inspected_parent["status"] == "completed"
+    assert inspected_child["status"] == "failed"
+    assert "stale because parent result changed" in inspected_child["parent_error"]
 
 
 def test_parent_filter_delete_is_blocked_while_derived_filter_exists(
@@ -1911,10 +2033,14 @@ def test_filter_list_marks_orphaned_derived_filter_failed(tmp_path: Path) -> Non
     )
     assert orphan["status"] == "failed"
     assert orphan["parent_error"] == "Parent filter workflow not found: parent"
-    with pytest.raises(ValueError, match="Parent filter workflow not found: parent"):
-        filter_presets.manage_filter_presets_payload(
-            {"data_root": str(data_root), "action": "inspect"}
-        )
+    inspected = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "inspect"}
+    )
+    inspected_orphan = next(
+        item for item in inspected["presets"] if item["id"] == "parent/child"
+    )
+    assert inspected_orphan["status"] == "failed"
+    assert inspected_orphan["parent_error"] == "Parent filter workflow not found: parent"
 
 
 def test_disclosure_filter_presets_reject_invalid_workspace_json(tmp_path: Path) -> None:
@@ -1942,15 +2068,24 @@ def test_html_download_inspect_folder_route_deletes_unexpected_file(tmp_path: Pa
     unexpected.write_text("<html></html>", encoding="utf-8")
 
     client = TestClient(app)
+    body = _external_workspace_body(
+        tmp_path,
+        {"disclosures": [{"acpt_no": "20250101000001"}]},
+        output_directory=str(output_directory),
+    )
+    inspected = client.post(
+        "/api/disclosures/external-html-download/inspect-folder",
+        json={**body, "dry_run": True},
+    )
+    assert inspected.status_code == 200
     response = client.post(
         "/api/disclosures/external-html-download/inspect-folder",
-        json=_external_workspace_body(
-            tmp_path,
-            {"disclosures": [{"acpt_no": "20250101000001"}]},
-            output_directory=str(output_directory),
-            delete_confirmed=True,
-            delete_confirmation_text="확인했습니다.",
-        ),
+        json={
+            **body,
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+            "deletion_confirmation": inspected.json()["deletion_confirmation"],
+        },
     )
 
     assert response.status_code == 200
@@ -2747,12 +2882,13 @@ def test_download_inspect_folder_start_route(tmp_path: Path, monkeypatch) -> Non
 
 def test_html_section_inspect_route_reports_file_without_canonical_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    (input_directory / "20260421000111.html").write_text(
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260421000111.html").write_text(
         "<html><head></head><body><p>목차 없는 문서</p></body></html>",
         encoding="utf-8",
     )
-    (input_directory / "20260422000832.html").write_text(
+    (source_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>
@@ -2775,25 +2911,24 @@ def test_html_section_inspect_route_reports_file_without_canonical_toc(tmp_path:
     assert payload["summary"] == {
         "found_files": 2,
         "documents_with_sections": 1,
-        "files_without_sections": 0,
-        "failed_files": 1,
+        "files_without_sections": 1,
+        "failed_files": 0,
         "reported_problem_files": 1,
         "source_unavailable_files": 0,
     }
-    assert payload["problem_files"][0]["source_relative_path"] == "20260421000111.html"
-    assert payload["problem_files"][0]["error"] == (
-        "지원하는 목차 구조(SECTION, COVER, PART 또는 XForms)를 찾지 못했습니다."
-    )
+    assert payload["problem_files"][0]["source_relative_path"] == "2026/20260421000111.html"
+    assert payload["problem_files"][0]["error"] == "분리할 목차를 찾지 못했습니다."
 
 
 def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
     for index in range(21):
         section_markup = "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2>"
         if index == 0:
             section_markup += "<h2 class='SECTION-2' id='toc_2'><p class='SECTION-2'>본문</p></h2>"
-        (input_directory / f"202604{index + 1:02d}000001.html").write_text(
+        (source_directory / f"202604{index + 1:02d}000001.html").write_text(
             f"<html><head></head><body>{section_markup}</body></html>",
             encoding="utf-8",
         )
@@ -2823,9 +2958,10 @@ def test_html_section_source_list_route_returns_one_page_with_toc_counts(tmp_pat
 
 def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: Path) -> None:
     input_directory = tmp_path / "kind_html_contents"
-    input_directory.mkdir()
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
     for source_name in ["20260401000001.html", "20260402000001.html"]:
-        (input_directory / source_name).write_text(
+        (source_directory / source_name).write_text(
             """
             <html><head></head><body>
               <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
@@ -2834,7 +2970,7 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
             """,
             encoding="utf-8",
         )
-    (input_directory / "20260403000001.html").write_text(
+    (source_directory / "20260403000001.html").write_text(
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2></body></html>",
         encoding="utf-8",
     )
@@ -2875,14 +3011,14 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
             ],
             "sample_documents": [
                 {
-                    "source_file": str(input_directory / "20260401000001.html"),
+                    "source_file": str(source_directory / "20260401000001.html"),
                     "source_name": "20260401000001.html",
-                    "source_relative_path": "20260401000001.html",
+                    "source_relative_path": "2026/20260401000001.html",
                 },
                 {
-                    "source_file": str(input_directory / "20260402000001.html"),
+                    "source_file": str(source_directory / "20260402000001.html"),
                     "source_name": "20260402000001.html",
-                    "source_relative_path": "20260402000001.html",
+                    "source_relative_path": "2026/20260402000001.html",
                 },
             ],
         },
@@ -2903,9 +3039,9 @@ def test_html_section_kinds_route_returns_unique_toc_sequence_counts(tmp_path: P
             ],
             "sample_documents": [
                 {
-                    "source_file": str(input_directory / "20260403000001.html"),
+                    "source_file": str(source_directory / "20260403000001.html"),
                     "source_name": "20260403000001.html",
-                    "source_relative_path": "20260403000001.html",
+                    "source_relative_path": "2026/20260403000001.html",
                 }
             ],
         },
@@ -3053,6 +3189,7 @@ def test_html_section_save_start_route_saves_all_toc_sections_automatically(
         "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
+        "unexpected_files": 0,
         "removed_correction_sections": 0,
         "source_unavailable_files": 0,
     }
@@ -3114,6 +3251,7 @@ def test_html_section_save_start_route_ignores_obsolete_pattern_selection(tmp_pa
         "expected_files": 1,
         "integrity_ok": True,
         "missing_files": 0,
+        "unexpected_files": 0,
         "removed_correction_sections": 0,
         "source_unavailable_files": 0,
     }
@@ -3130,8 +3268,9 @@ def test_html_section_save_start_route_ignores_obsolete_pattern_selection(tmp_pa
 
 def test_html_section_inspect_start_route_lists_toc_sections(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    (input_directory / "20260422000832.html").write_text(
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서</p></h2>

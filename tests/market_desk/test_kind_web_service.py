@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 
 import finiq.market_desk.web.features.disclosures.table_export as table_export_module
+import finiq.market_desk.web.features.disclosures.html_common as html_common_module
 import finiq.market_desk.web.features.market_data.service_payloads as service_payloads_module
 import finiq.market_desk.web.features.market_data.service_sources as service_sources_module
 from finiq.config import QUANTI_DIR, STOCK_DATA_DIR
@@ -1840,6 +1841,162 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert metadata["shard_year"] == "2025"
     assert metadata["table_name"] == "disclosures"
     assert metadata["unlinked_disclosures"] == "0"
+
+
+def test_table_build_publish_failure_preserves_previous_shards_and_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    first = build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest_path = Path(first["manifest_path"])
+    shard_path = manifest_path.parent / first["shards"][0]["relative_path"]
+    old_manifest = manifest_path.read_bytes()
+    old_shard = shard_path.read_bytes()
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace("전환사채발행결정", "교체된제목"),
+        encoding="utf-8",
+    )
+
+    original_replace = table_export_module.os.replace
+
+    def fail_manifest_publish(source: Path, target: Path) -> None:
+        source_path = Path(source)
+        if (
+            source_path.name == table_export_module.MANIFEST_FILENAME
+            and source_path.parent.name.startswith(".finiq-table-build-")
+        ):
+            raise OSError("simulated manifest publish failure")
+        original_replace(source, target)
+
+    monkeypatch.setattr(table_export_module.os, "replace", fail_manifest_publish)
+
+    with pytest.raises(OSError, match="manifest publish failure"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(output_root),
+            }
+        )
+
+    assert manifest_path.read_bytes() == old_manifest
+    assert shard_path.read_bytes() == old_shard
+    assert not list(output_root.glob(".finiq-table-build-*"))
+
+
+def test_table_generation_publish_waits_for_manifest_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    data_root = tmp_path / "workspace"
+    output_root = data_root / "02-table"
+    first = build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest_path = Path(first["manifest_path"])
+    shard_path = manifest_path.parent / first["shards"][0]["relative_path"]
+    old_manifest = manifest_path.read_bytes()
+    old_shard = shard_path.read_bytes()
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "전환사채발행결정",
+            "교체된제목",
+        ),
+        encoding="utf-8",
+    )
+
+    manifest_loaded = threading.Event()
+    release_reader = threading.Event()
+    publish_waiting = threading.Event()
+    original_load = service_payloads_module._load_sqlite_manifest
+    original_publish = table_export_module._publish_sqlite_generation
+
+    def pause_after_manifest_load(path: Path) -> dict[str, Any]:
+        manifest = original_load(path)
+        manifest_loaded.set()
+        assert release_reader.wait(timeout=5)
+        return manifest
+
+    def track_publish(**kwargs: Any) -> None:
+        publish_waiting.set()
+        original_publish(**kwargs)
+
+    monkeypatch.setattr(
+        service_payloads_module,
+        "_load_sqlite_manifest",
+        pause_after_manifest_load,
+    )
+    monkeypatch.setattr(
+        table_export_module,
+        "_publish_sqlite_generation",
+        track_publish,
+    )
+
+    reader_result: dict[str, Any] = {}
+    failures: list[BaseException] = []
+
+    def read_generation() -> None:
+        try:
+            reader_result.update(
+                filter_disclosures_payload(
+                    {"data_root": str(data_root), "filter_blocks": []}
+                )
+            )
+        except BaseException as error:
+            failures.append(error)
+
+    def publish_generation() -> None:
+        try:
+            build_disclosure_table_payload(
+                {
+                    "root_directory": str(source_root),
+                    "output_path": str(output_root),
+                }
+            )
+        except BaseException as error:
+            failures.append(error)
+
+    reader = threading.Thread(target=read_generation)
+    writer = threading.Thread(target=publish_generation)
+    reader.start()
+    assert manifest_loaded.wait(timeout=5)
+    writer.start()
+    assert publish_waiting.wait(timeout=5)
+
+    assert writer.is_alive()
+    assert manifest_path.read_bytes() == old_manifest
+    assert shard_path.read_bytes() == old_shard
+
+    release_reader.set()
+    reader.join(timeout=5)
+    writer.join(timeout=5)
+
+    assert not reader.is_alive()
+    assert not writer.is_alive()
+    assert failures == []
+    assert all(
+        "교체된제목" not in disclosure["title"]
+        for disclosure in reader_result["disclosures"]
+    )
+    refreshed = filter_disclosures_payload(
+        {"data_root": str(data_root), "filter_blocks": []}
+    )
+    assert any(
+        "교체된제목" in disclosure["title"]
+        for disclosure in refreshed["disclosures"]
+    )
 
 
 def test_table_build_and_inspection_each_inventory_source_once(
@@ -4008,14 +4165,21 @@ def test_clean_disclosure_external_html_output_directory_deletes_unexpected_exte
     expected.write_text("<html></html>", encoding="utf-8")
     unexpected.write_text("<html></html>", encoding="utf-8")
 
+    body = _external_workspace_body(
+        tmp_path,
+        {"disclosures": [{"acpt_no": "20250101000001"}]},
+        output_directory=str(output_directory),
+    )
+    inspected = clean_disclosure_html_output_directory_payload(
+        {**body, "dry_run": True}
+    )
     payload = clean_disclosure_html_output_directory_payload(
-        _external_workspace_body(
-            tmp_path,
-            {"disclosures": [{"acpt_no": "20250101000001"}]},
-            output_directory=str(output_directory),
-            delete_confirmed=True,
-            delete_confirmation_text="확인했습니다.",
-        )
+        {
+            **body,
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+            "deletion_confirmation": inspected["deletion_confirmation"],
+        }
     )
 
     assert payload["source_type"] == "external"
@@ -4144,12 +4308,19 @@ def test_clean_disclosure_external_html_output_directory_deletes_unexpected_cont
     expected.write_text("<html></html>", encoding="utf-8")
     unexpected.write_text("{}", encoding="utf-8")
 
+    body = {
+        "output_directory": str(output_directory),
+        "source_compressed_json_path": str(compressed_path),
+    }
+    inspected = clean_disclosure_html_output_directory_payload(
+        {**body, "dry_run": True}
+    )
     payload = clean_disclosure_html_output_directory_payload(
         {
-            "output_directory": str(output_directory),
-            "source_compressed_json_path": str(compressed_path),
+            **body,
             "delete_confirmed": True,
             "delete_confirmation_text": "확인했습니다.",
+            "deletion_confirmation": inspected["deletion_confirmation"],
         }
     )
 
@@ -4172,27 +4343,175 @@ def test_clean_disclosure_external_html_output_directory_deletes_unexpected_year
     expected.write_text("<html></html>", encoding="utf-8")
     unexpected.write_text("<html></html>", encoding="utf-8")
 
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {
+                    "acpt_no": "20250101000001",
+                    "disclosed_at": "2025-01-01",
+                }
+            ]
+        },
+        output_directory=str(output_directory),
+    )
+    inspected = clean_disclosure_html_output_directory_payload(
+        {**body, "dry_run": True}
+    )
     payload = clean_disclosure_html_output_directory_payload(
-        _external_workspace_body(
-            tmp_path,
-            {
-                "disclosures": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "disclosed_at": "2025-01-01",
-                    }
-                ]
-            },
-            output_directory=str(output_directory),
-            delete_confirmed=True,
-            delete_confirmation_text="확인했습니다.",
-        )
+        {
+            **body,
+            "delete_confirmed": True,
+            "delete_confirmation_text": "확인했습니다.",
+            "deletion_confirmation": inspected["deletion_confirmation"],
+        }
     )
 
     assert payload["deleted_count"] == 1
     assert payload["deleted_files"][0]["name"] == "2025/20240101000001.html"
     assert expected.exists()
     assert not unexpected.exists()
+
+
+def test_clean_disclosure_html_rejects_delete_when_target_limit_changed_after_inspection(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "viewer_html"
+    year_directory = output_directory / "2025"
+    year_directory.mkdir(parents=True)
+    first = year_directory / "20250101000001.html"
+    second = year_directory / "20250102000002.html"
+    unexpected = year_directory / "20240101000001.html"
+    for path in (first, second, unexpected):
+        path.write_text("<html></html>", encoding="utf-8")
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {"acpt_no": first.stem, "disclosed_at": "2025-01-01"},
+                {"acpt_no": second.stem, "disclosed_at": "2025-01-02"},
+            ]
+        },
+        output_directory=str(output_directory),
+    )
+    inspected = clean_disclosure_html_output_directory_payload(
+        {**body, "dry_run": True}
+    )
+
+    with pytest.raises(ValueError, match="changed after inspection"):
+        clean_disclosure_html_output_directory_payload(
+            {
+                **body,
+                "limit": 1,
+                "delete_confirmed": True,
+                "delete_confirmation_text": "확인했습니다.",
+                "deletion_confirmation": inspected["deletion_confirmation"],
+            }
+        )
+
+    assert first.exists()
+    assert second.exists()
+    assert unexpected.exists()
+
+
+def test_clean_disclosure_html_rejects_symlinked_year_directory(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "viewer_html"
+    output_directory.mkdir()
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+    outside_file = outside_directory / "20240101000001.html"
+    outside_file.write_text("<html></html>", encoding="utf-8")
+    (output_directory / "2025").symlink_to(
+        outside_directory,
+        target_is_directory=True,
+    )
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {
+                    "acpt_no": "20250101000001",
+                    "disclosed_at": "2025-01-01",
+                }
+            ]
+        },
+        output_directory=str(output_directory),
+    )
+
+    with pytest.raises(ValueError, match="must not contain symbolic links"):
+        clean_disclosure_html_output_directory_payload(
+            {**body, "dry_run": True}
+        )
+
+    assert outside_file.read_text(encoding="utf-8") == "<html></html>"
+
+
+def test_clean_disclosure_html_restores_candidates_when_quarantine_move_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_directory = tmp_path / "viewer_html"
+    year_directory = output_directory / "2025"
+    year_directory.mkdir(parents=True)
+    expected = year_directory / "20250101000001.html"
+    unexpected = [
+        year_directory / "20240101000001.html",
+        year_directory / "20240102000002.html",
+    ]
+    expected.write_text("expected", encoding="utf-8")
+    for index, path in enumerate(unexpected, start=1):
+        path.write_text(f"unexpected {index}", encoding="utf-8")
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {
+                    "acpt_no": expected.stem,
+                    "disclosed_at": "2025-01-01",
+                }
+            ]
+        },
+        output_directory=str(output_directory),
+    )
+    inspected = clean_disclosure_html_output_directory_payload(
+        {**body, "dry_run": True}
+    )
+    original_replace = html_common_module.os.replace
+    quarantine_moves = 0
+
+    def fail_second_quarantine_move(source: object, target: object) -> None:
+        nonlocal quarantine_moves
+        target_path = Path(target)
+        if target_path.parent.name.startswith(".finiq-html-delete-"):
+            quarantine_moves += 1
+            if quarantine_moves == 2:
+                raise OSError("quarantine move failed")
+        original_replace(source, target)
+
+    monkeypatch.setattr(
+        html_common_module.os,
+        "replace",
+        fail_second_quarantine_move,
+    )
+
+    with pytest.raises(OSError, match="quarantine move failed"):
+        clean_disclosure_html_output_directory_payload(
+            {
+                **body,
+                "delete_confirmed": True,
+                "delete_confirmation_text": "확인했습니다.",
+                "deletion_confirmation": inspected["deletion_confirmation"],
+            }
+        )
+
+    assert expected.read_text(encoding="utf-8") == "expected"
+    assert [path.read_text(encoding="utf-8") for path in unexpected] == [
+        "unexpected 1",
+        "unexpected 2",
+    ]
+    assert not list(output_directory.glob(".finiq-html-delete-*"))
 
 
 def test_clean_disclosure_external_html_output_directory_allows_compressed_external_json(tmp_path: Path) -> None:
@@ -5540,6 +5859,27 @@ def test_split_internal_html_sections_rejects_ordinary_paragraph_as_heading_titl
         )
 
 
+def test_split_internal_html_sections_separates_direct_body_text_as_preamble() -> None:
+    sections = split_internal_html_sections(
+        "<html><head></head><body>\uc815\uc815 \uc2e0\uace0"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>\uc5c5\ubb34 \ubcf8\ubb38</p></h2>"
+        "<p>\ubcf8\ubb38 \ub0b4\uc6a9</p></body></html>"
+    )
+
+    assert [section.toc_id for section in sections] == ["preamble", "toc_1"]
+    assert sections[0].title == "\uc815\uc815 \uc2e0\uace0"
+    assert "\uc815\uc815 \uc2e0\uace0" in sections[0].html
+    assert "\uc815\uc815 \uc2e0\uace0" not in sections[1].html
+
+
+def test_split_internal_html_sections_rejects_div_as_recovered_heading_title() -> None:
+    with pytest.raises(ValueError, match="TOC boundary title is required"):
+        split_internal_html_sections(
+            "<html><head></head><body><h2 class='SECTION-1'></h2>"
+            "<div class='SECTION-1'>\uc9c0\uc6d0\ud558\uc9c0 \uc54a\ub294 \uc81c\ubaa9</div></body></html>"
+        )
+
+
 def test_split_internal_html_sections_preserves_source_toc_hierarchy() -> None:
     sections = split_internal_html_sections(
         """
@@ -5697,15 +6037,323 @@ def test_save_disclosure_html_sections_payload_rejects_files_without_toc(tmp_pat
     assert not list(output_directory.rglob("*.html"))
 
 
+def test_section_save_rejects_html_outside_year_directory(tmp_path: Path) -> None:
+    input_directory = tmp_path / "05-internal-html-download"
+    source = input_directory / "bond_issuance" / "2026" / "20260101000001.html"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1'><p class='SECTION-1'>\ubcf8\ubb38</p></h2>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "output"
+
+    with pytest.raises(ValueError, match=r"<YYYY>/<acpt_no>\.html"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert not output_directory.exists()
+
+
+def test_section_save_rejects_unexpected_existing_html_before_writing(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "input"
+    source = input_directory / "2026" / "20260101000001.html"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1'><p class='SECTION-1'>\ubcf8\ubb38</p></h2>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "output"
+    stale = output_directory / "2025" / "20250101000001.html"
+    stale.parent.mkdir(parents=True)
+    stale.write_text("stale", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unexpected existing HTML"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert stale.read_text(encoding="utf-8") == "stale"
+    assert not (output_directory / "2026" / source.name).exists()
+
+
+def test_section_save_rejects_symlinked_output_year_directory(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "input"
+    source = input_directory / "2026" / "20260101000001.html"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "<html><body><h2 class='SECTION-1'><p class='SECTION-1'>본문</p>"
+        "</h2></body></html>",
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "output"
+    output_directory.mkdir()
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+    outside_file = outside_directory / source.name
+    outside_file.write_text("outside", encoding="utf-8")
+    (output_directory / "2026").symlink_to(
+        outside_directory,
+        target_is_directory=True,
+    )
+
+    with pytest.raises(ValueError, match="must not contain symbolic links"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert outside_file.read_text(encoding="utf-8") == "outside"
+
+
+def test_section_save_limit_allows_existing_output_for_unselected_source(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "input"
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    markup = (
+        "<html><body><h2 class='SECTION-1'><p class='SECTION-1'>본문</p>"
+        "</h2></body></html>"
+    )
+    first = source_directory / "20260101000001.html"
+    second = source_directory / "20260102000002.html"
+    first.write_text(markup, encoding="utf-8")
+    second.write_text(markup, encoding="utf-8")
+    output_directory = tmp_path / "output"
+    existing = output_directory / "2026" / second.name
+    existing.parent.mkdir(parents=True)
+    existing.write_text("existing", encoding="utf-8")
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+            "limit": 1,
+        }
+    )
+
+    assert payload["summary"]["integrity_ok"] is True
+    assert payload["summary"]["unexpected_files"] == 0
+    assert existing.read_text(encoding="utf-8") == "existing"
+
+
+def test_section_save_rolls_back_all_outputs_when_publish_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_directory = tmp_path / "input"
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    output_directory = tmp_path / "output"
+    output_year = output_directory / "2026"
+    output_year.mkdir(parents=True)
+    names = ["20260101000001.html", "20260102000002.html"]
+    for index, name in enumerate(names, start=1):
+        (source_directory / name).write_text(
+            "<html><body><h2 class='SECTION-1'>"
+            f"<p class='SECTION-1'>새 내용 {index}</p></h2></body></html>",
+            encoding="utf-8",
+        )
+        (output_year / name).write_text(f"old {index}", encoding="utf-8")
+
+    original_replace = disclosure_html_sections.os.replace
+
+    def fail_second_publish(source: object, target: object) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        if (
+            target_path.name == names[1]
+            and ".backups" not in source_path.parts
+            and any(
+                part.startswith(f".{output_directory.name}.part-")
+                for part in source_path.parts
+            )
+        ):
+            raise OSError("publish failed")
+        original_replace(source, target)
+
+    monkeypatch.setattr(disclosure_html_sections.os, "replace", fail_second_publish)
+
+    with pytest.raises(OSError, match="publish failed"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert [
+        (output_year / name).read_text(encoding="utf-8") for name in names
+    ] == ["old 1", "old 2"]
+
+
+def test_section_save_rechecks_unexpected_output_after_staging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_directory = tmp_path / "input"
+    source = input_directory / "2026" / "20260101000001.html"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "<html><body><h2 class='SECTION-1'><p class='SECTION-1'>본문</p>"
+        "</h2></body></html>",
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "output"
+    stale = output_directory / "2025" / "20250101000001.html"
+    original_output = disclosure_html_sections._automatic_section_output
+
+    def create_stale_output(source_file: Path) -> dict[str, Any]:
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text("stale", encoding="utf-8")
+        return original_output(source_file)
+
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "_automatic_section_output",
+        create_stale_output,
+    )
+
+    with pytest.raises(ValueError, match="unexpected existing HTML"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert stale.read_text(encoding="utf-8") == "stale"
+    assert not (output_directory / "2026" / source.name).exists()
+
+
+def test_section_save_rolls_back_published_outputs_when_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    input_directory = tmp_path / "input"
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    output_directory = tmp_path / "output"
+    output_year = output_directory / "2026"
+    output_year.mkdir(parents=True)
+    names = ["20260101000001.html", "20260102000002.html"]
+    for index, name in enumerate(names, start=1):
+        (source_directory / name).write_text(
+            "<html><body><h2 class='SECTION-1'>"
+            f"<p class='SECTION-1'>새 내용 {index}</p></h2></body></html>",
+            encoding="utf-8",
+        )
+        (output_year / name).write_text(f"old {index}", encoding="utf-8")
+
+    published_once = False
+    original_replace = disclosure_html_sections.os.replace
+
+    def track_publish(source: object, target: object) -> None:
+        nonlocal published_once
+        source_path = Path(source)
+        target_path = Path(target)
+        original_replace(source, target)
+        if (
+            target_path.name == names[0]
+            and ".backups" not in source_path.parts
+            and any(
+                part.startswith(f".{output_directory.name}.part-")
+                for part in source_path.parts
+            )
+        ):
+            published_once = True
+
+    monkeypatch.setattr(disclosure_html_sections.os, "replace", track_publish)
+
+    payload = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        },
+        cancel_check=lambda: published_once,
+    )
+
+    assert payload == {"cancelled": True}
+    assert [
+        (output_year / name).read_text(encoding="utf-8") for name in names
+    ] == ["old 1", "old 2"]
+
+
+def test_section_save_rejects_output_nested_below_input(tmp_path: Path) -> None:
+    input_directory = tmp_path / "input"
+    source = input_directory / "2026" / "20260101000001.html"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1'><p class='SECTION-1'>\ubcf8</p></h2>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    output_directory = input_directory / "output"
+
+    with pytest.raises(ValueError, match="must not be inside input_directory"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert not output_directory.exists()
+
+
+def test_section_save_rejects_duplicate_filename_stems_across_years(
+    tmp_path: Path,
+) -> None:
+    input_directory = tmp_path / "input"
+    markup = (
+        "<html><head></head><body>"
+        "<h2 class='SECTION-1'><p class='SECTION-1'>본문</p></h2>"
+        "</body></html>"
+    )
+    for year in ("2025", "2026"):
+        source = input_directory / year / "20260101000001.html"
+        source.parent.mkdir(parents=True)
+        source.write_text(markup, encoding="utf-8")
+    output_directory = tmp_path / "output"
+
+    with pytest.raises(ValueError, match="duplicate HTML filename stem"):
+        save_disclosure_html_sections_payload(
+            {
+                "input_directory": str(input_directory),
+                "output_directory": str(output_directory),
+            }
+        )
+
+    assert not output_directory.exists()
+
+
 def test_section_save_ignores_obsolete_zero_rule_selection(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    source = input_directory / "20260422000832.html"
-    stale_output = output_directory / source.name
-    output_directory.mkdir()
+    source = input_directory / "2026" / "20260422000832.html"
+    source.parent.mkdir(parents=True)
+    stale_output = output_directory / "2026" / source.name
+    stale_output.parent.mkdir(parents=True)
     stale_output.write_text("stale", encoding="utf-8")
     source.write_text(
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>주요사항보고서</p></h2><p>본문</p></body></html>",
@@ -5739,8 +6387,8 @@ def test_section_save_ignores_obsolete_unknown_selected_toc(
 ) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    source = input_directory / "20260422000832.html"
+    source = input_directory / "2026" / "20260422000832.html"
+    source.parent.mkdir(parents=True)
     source.write_text(
         "<html><head></head><body><h2 class='SECTION-1'><p class='SECTION-1'>주요사항보고서</p></h2><p>본문</p></body></html>",
         encoding="utf-8",
@@ -5757,15 +6405,16 @@ def test_section_save_ignores_obsolete_unknown_selected_toc(
     )
 
     assert result["summary"]["saved_files"] == 1
-    assert (output_directory / source.name).is_file()
+    assert (output_directory / "2026" / source.name).is_file()
 
 
 def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    nested_directory = input_directory / "2025" / "shareholder_meeting"
-    nested_directory.mkdir(parents=True)
-    (input_directory / "20260422000832.html").write_text(
+    current_directory = input_directory / "2026"
+    prior_directory = input_directory / "2025"
+    current_directory.mkdir(parents=True)
+    prior_directory.mkdir(parents=True)
+    (current_directory / "20260422000832.html").write_text(
         """
         <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서 / 거래소 신고의무 사항</p></h2>
@@ -5776,7 +6425,7 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: P
         """,
         encoding="utf-8",
     )
-    (nested_directory / "20260423000533.html").write_text(
+    (prior_directory / "20260423000533.html").write_text(
         """
         <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">주요사항보고서 / 거래소 신고의무 사항</p></h2>
@@ -5803,8 +6452,8 @@ def test_inspect_disclosure_html_sections_payload_lists_document_toc(tmp_path: P
         "20260423000533.html",
     ]
     assert [document["source_relative_path"] for document in documents] == [
-        "20260422000832.html",
-        "2025/shareholder_meeting/20260423000533.html",
+        "2026/20260422000832.html",
+        "2025/20260423000533.html",
     ]
     assert [section["toc_id"] for section in documents[0]["sections"]] == ["toc_1", "toc_2"]
     assert [section["toc_id"] for section in documents[1]["sections"]] == ["toc_1"]
@@ -5816,9 +6465,10 @@ def test_html_section_inspect_and_save_use_requested_progress_interval(
 ) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
     for index in range(1, 4):
-        (input_directory / f"2026040{index}000001.html").write_text(
+        (source_directory / f"2026040{index}000001.html").write_text(
             "<html><head></head><body>"
             "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2>"
             f"<p>본문 {index}</p></body></html>",
@@ -5867,12 +6517,13 @@ def test_inspect_disclosure_html_sections_payload_stops_before_next_file_when_ca
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    (input_directory / "20260401000001.html").write_text(
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260401000001.html").write_text(
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2><p>첫 번째</p></body></html>",
         encoding="utf-8",
     )
-    (input_directory / "20260402000001.html").write_text(
+    (source_directory / "20260402000001.html").write_text(
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
@@ -5904,8 +6555,9 @@ def test_html_section_summary_propagates_file_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    (input_directory / "20260401000001.html").write_text(
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
+    (source_directory / "20260401000001.html").write_text(
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'>목차</h2></body></html>",
         encoding="utf-8",
     )
@@ -5925,22 +6577,13 @@ def test_html_section_summary_propagates_file_errors(
         )
 
 
-def test_html_section_inspection_reports_file_errors_without_stopping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_html_section_inspection_reports_files_without_sections(
+    tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    source_file = input_directory / "20260401000001.html"
+    source_file = input_directory / "2026" / "20260401000001.html"
+    source_file.parent.mkdir(parents=True)
     source_file.write_text("<html><body>broken</body></html>", encoding="utf-8")
-
-    def fail_inspection(_markup: bytes) -> list[HtmlSectionSummary]:
-        raise ValueError("supported TOC structure is required")
-
-    monkeypatch.setattr(
-        disclosure_html_sections,
-        "inspect_internal_html_sections",
-        fail_inspection,
-    )
 
     payload = inspect_disclosure_html_sections_payload(
         {"input_directory": str(input_directory), "report_limit": 1}
@@ -5949,17 +6592,17 @@ def test_html_section_inspection_reports_file_errors_without_stopping(
     assert payload["summary"] == {
         "found_files": 1,
         "documents_with_sections": 0,
-        "files_without_sections": 0,
-        "failed_files": 1,
+        "files_without_sections": 1,
+        "failed_files": 0,
         "reported_problem_files": 1,
         "source_unavailable_files": 0,
     }
     assert payload["problem_files"] == [
         {
-            "kind": "read_failed",
+            "kind": "no_sections",
             "source_file": str(source_file),
-            "source_relative_path": source_file.name,
-            "error": "지원하는 목차 구조(SECTION, COVER, PART 또는 XForms)를 찾지 못했습니다.",
+            "source_relative_path": f"2026/{source_file.name}",
+            "error": "분리할 목차를 찾지 못했습니다.",
         }
     ]
 
@@ -5968,8 +6611,8 @@ def test_html_section_inspection_counts_source_unavailable_as_expected(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    source_file = input_directory / "20260401000001.html"
+    source_file = input_directory / "2026" / "20260401000001.html"
+    source_file.parent.mkdir(parents=True)
     source_file.write_bytes(
         _render_internal_html_source_unavailable_placeholder(
             acpt_no=source_file.stem,
@@ -6002,12 +6645,13 @@ def test_html_section_inspection_counts_source_unavailable_as_expected(
 
 def test_list_disclosure_html_section_sources_payload_pages_with_current_page_toc_counts(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
     for index in range(22):
         section_markup = "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2>"
         if index == 0:
             section_markup += "<h2 class='SECTION-2' id='toc_2'><p class='SECTION-2'>본문</p></h2>"
-        (input_directory / f"202604{index + 1:02d}000001.html").write_text(
+        (source_directory / f"202604{index + 1:02d}000001.html").write_text(
             f"<html><head></head><body>{section_markup}</body></html>",
             encoding="utf-8",
         )
@@ -6050,10 +6694,10 @@ def test_list_disclosure_html_section_sources_ignores_hidden_automation_cache(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    visible = input_directory / "20260712000001.html"
-    hidden = input_directory / ".automation-current" / "20260712000002.html"
-    hidden.parent.mkdir()
+    visible = input_directory / "2026" / "20260712000001.html"
+    hidden = input_directory / ".automation-current" / "2026" / "20260712000002.html"
+    visible.parent.mkdir(parents=True)
+    hidden.parent.mkdir(parents=True)
     markup = "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>목차</p></h2></body></html>"
     visible.write_text(markup, encoding="utf-8")
     hidden.write_text(markup, encoding="utf-8")
@@ -6072,9 +6716,10 @@ def test_summarize_disclosure_html_section_kinds_payload_uses_workers(
     import threading
 
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
     for acpt_no in ("20260401000001", "20260402000001"):
-        (input_directory / f"{acpt_no}.html").write_text(
+        (source_directory / f"{acpt_no}.html").write_text(
             "<html><head></head><body>"
             "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>1</p></h2>"
             "</body></html>",
@@ -6108,14 +6753,13 @@ def test_summarize_disclosure_html_section_kinds_payload_uses_workers(
 
 def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_sequences(tmp_path: Path) -> None:
     input_directory = tmp_path / "content_html"
-    input_directory.mkdir()
-    nested_directory = input_directory / "2026"
-    nested_directory.mkdir()
+    source_directory = input_directory / "2026"
+    source_directory.mkdir(parents=True)
     for source_file in [
-        input_directory / "20260401000001.html",
-        nested_directory / "20260402000001.html",
-        input_directory / "20260403000001.html",
-        input_directory / "20260404000001.html",
+        source_directory / "20260401000001.html",
+        source_directory / "20260402000001.html",
+        source_directory / "20260403000001.html",
+        source_directory / "20260404000001.html",
     ]:
         source_file.write_text(
             """
@@ -6128,7 +6772,7 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
             """,
             encoding="utf-8",
         )
-    (input_directory / "20260405000001.html").write_text(
+    (source_directory / "20260405000001.html").write_text(
         """
         <html><head></head><body>
           <h2 class="SECTION-1" id="toc_1"><p class="SECTION-1">1</p></h2>
@@ -6171,22 +6815,22 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
                     "parent_toc_id": "toc_1",
                     "is_toc": True,
                 },
-            ],
-            "sample_documents": [
-                {
-                    "source_file": str(nested_directory / "20260402000001.html"),
-                    "source_name": "20260402000001.html",
-                    "source_relative_path": "2026/20260402000001.html",
-                },
-                {
-                    "source_file": str(input_directory / "20260401000001.html"),
-                    "source_name": "20260401000001.html",
-                    "source_relative_path": "20260401000001.html",
-                },
-                {
-                    "source_file": str(input_directory / "20260403000001.html"),
-                    "source_name": "20260403000001.html",
-                    "source_relative_path": "20260403000001.html",
+                ],
+                "sample_documents": [
+                    {
+                        "source_file": str(source_directory / "20260401000001.html"),
+                        "source_name": "20260401000001.html",
+                        "source_relative_path": "2026/20260401000001.html",
+                    },
+                    {
+                        "source_file": str(source_directory / "20260402000001.html"),
+                        "source_name": "20260402000001.html",
+                        "source_relative_path": "2026/20260402000001.html",
+                    },
+                    {
+                        "source_file": str(source_directory / "20260403000001.html"),
+                        "source_name": "20260403000001.html",
+                        "source_relative_path": "2026/20260403000001.html",
                 },
             ],
         },
@@ -6205,11 +6849,11 @@ def test_summarize_disclosure_html_section_kinds_payload_counts_unique_toc_seque
                     "is_toc": True,
                 }
             ],
-            "sample_documents": [
-                {
-                    "source_file": str(input_directory / "20260405000001.html"),
-                    "source_name": "20260405000001.html",
-                    "source_relative_path": "20260405000001.html",
+                "sample_documents": [
+                    {
+                        "source_file": str(source_directory / "20260405000001.html"),
+                        "source_name": "20260405000001.html",
+                        "source_relative_path": "2026/20260405000001.html",
                 }
             ],
         },
@@ -6261,8 +6905,8 @@ def test_section_output_inspection_reuses_save_selection_and_detects_content_cha
 ) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
-    input_directory.mkdir()
-    source = input_directory / "20260401000001.html"
+    source = input_directory / "2026" / "20260401000001.html"
+    source.parent.mkdir(parents=True)
     source.write_text(
         """
         <html><head></head><body>
@@ -6284,12 +6928,12 @@ def test_section_output_inspection_reuses_save_selection_and_detects_content_cha
     assert checked["summary"]["integrity_ok"] is True
     assert checked["summary"]["expected_files"] == 1
 
-    (output_directory / source.name).write_text("changed", encoding="utf-8")
+    (output_directory / "2026" / source.name).write_text("changed", encoding="utf-8")
 
     changed = inspect_disclosure_html_section_output_payload(body)
 
     assert changed["summary"]["integrity_ok"] is False
-    assert changed["mismatched_files"] == [source.name]
+    assert changed["mismatched_files"] == [f"2026/{source.name}"]
 
 
 def test_section_output_inspection_compares_each_content_before_next_result(
@@ -6514,6 +7158,34 @@ def test_section_save_never_discards_correction_word_after_first_section(
     assert "두 번째 본문" in output
 
 
+def test_section_save_removes_direct_text_correction_preamble(tmp_path: Path) -> None:
+    input_directory = tmp_path / "input"
+    source_file = input_directory / "2026" / "20260828000001.html"
+    source_file.parent.mkdir(parents=True)
+    source_file.write_text(
+        "<html><head></head><body>정정 신고"
+        "<h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>업무 본문</p></h2>"
+        "<p>본문 내용</p></body></html>",
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "output"
+
+    result = save_disclosure_html_sections_payload(
+        {
+            "input_directory": str(input_directory),
+            "output_directory": str(output_directory),
+        }
+    )
+    output = (output_directory / "2026" / source_file.name).read_text(
+        encoding="utf-8"
+    )
+
+    assert result["summary"]["removed_correction_sections"] == 1
+    assert "정정 신고" not in output
+    assert "업무 본문" in output
+    assert "본문 내용" in output
+
+
 def test_section_save_preserves_single_legacy_correction_disclosure(
     tmp_path: Path,
 ) -> None:
@@ -6579,7 +7251,10 @@ def test_save_disclosure_html_sections_payload_preserves_multiple_selected_secti
     assert not (output_directory / "2008" / "toc_1").exists()
 
 
-def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cancelled(tmp_path: Path) -> None:
+def test_save_disclosure_html_sections_payload_leaves_output_unchanged_when_cancelled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     input_directory = tmp_path / "content_html"
     output_directory = tmp_path / "section_html"
     source_directory = input_directory / "2008"
@@ -6592,8 +7267,23 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
         "<html><head></head><body><h2 class='SECTION-1' id='toc_1'><p class='SECTION-1'>2</p></h2><p>두 번째</p></body></html>",
         encoding="utf-8",
     )
+    rendered_files = 0
+    original_output = disclosure_html_sections._automatic_section_output
+
+    def tracked_output(source_file: Path) -> dict[str, Any]:
+        nonlocal rendered_files
+        result = original_output(source_file)
+        rendered_files += 1
+        return result
+
+    monkeypatch.setattr(
+        disclosure_html_sections,
+        "_automatic_section_output",
+        tracked_output,
+    )
+
     def cancel_check() -> bool:
-        return (output_directory / "2008" / "20260401000001.html").is_file()
+        return rendered_files == 1
 
     payload = save_disclosure_html_sections_payload(
         {
@@ -6609,7 +7299,7 @@ def test_save_disclosure_html_sections_payload_stops_before_next_file_when_cance
     )
 
     assert payload == {"cancelled": True}
-    assert (output_directory / "2008" / "20260401000001.html").is_file()
+    assert not (output_directory / "2008" / "20260401000001.html").exists()
     assert not (output_directory / "2008" / "20260402000001.html").exists()
 
 
@@ -7103,6 +7793,85 @@ def test_download_disclosure_external_html_payload_stops_when_cancelled(tmp_path
 
     assert payload["cancelled"] is True
     assert payload["saved_count"] == 1
+
+
+def test_download_disclosure_external_html_payload_keeps_prequeued_cancel_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    download_called = False
+
+    def fake_download(**kwargs):
+        nonlocal download_called
+        download_called = True
+        return []
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.external_html_download.download_disclosure_external_htmls",
+        fake_download,
+    )
+    cancel_disclosure_html_download("prequeued-external-cancel")
+
+    payload = download_disclosure_external_html_payload(
+        _external_workspace_body(
+            tmp_path,
+            {"disclosures": [{"acpt_no": "20250101000001"}]},
+            output_directory=str(tmp_path / "viewer_html"),
+            cancel_token="prequeued-external-cancel",
+        )
+    )
+
+    assert download_called is False
+    assert payload["cancelled"] is True
+    assert payload["saved_count"] == 0
+    assert not (tmp_path / "viewer_html").exists()
+
+
+def test_download_disclosure_internal_html_payload_keeps_prequeued_cancel_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "20250101000999",
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    download_called = False
+
+    def fake_download(**kwargs):
+        nonlocal download_called
+        download_called = True
+        return []
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
+        fake_download,
+    )
+    cancel_disclosure_html_download("prequeued-internal-cancel")
+
+    payload = download_disclosure_internal_html_payload(
+        {
+            "output_directory": str(tmp_path / "content_html"),
+            "source_compressed_json_path": str(compressed_path),
+            "cancel_token": "prequeued-internal-cancel",
+        }
+    )
+
+    assert download_called is False
+    assert payload["cancelled"] is True
+    assert payload["saved_count"] == 0
+    assert not (tmp_path / "content_html").exists()
 
 
 def test_parse_disclosure_html_payload_requires_mode(tmp_path: Path) -> None:
@@ -8872,6 +9641,46 @@ def test_parse_disclosure_html_payload_logs_success_progress_by_interval(tmp_pat
     assert not any("파싱 중 1/3:" in line for line in progress_log)
     assert not any("파싱 완료 1/3:" in line for line in progress_log)
     assert any("파싱 중간 확인: 이번 실행 2건 처리" in line for line in progress_log)
+
+
+def test_parse_disclosure_html_payload_logs_interval_without_partial_saves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    viewer_dir = tmp_path / "viewer_html"
+    viewer_dir.mkdir()
+    for index in range(3):
+        _html_parse_file(viewer_dir, f"2025010100000{index}.html").write_text(
+            "<html></html>", encoding="utf-8"
+        )
+
+    def fake_parser(html_text, *, file_path):
+        return {
+            "acpt_no": Path(file_path).stem,
+            "mode": "security_transaction",
+            "title": "",
+        }
+
+    monkeypatch.setitem(PARSER_REGISTRY, "security_transaction", fake_parser)
+    progress_log: list[str] = []
+
+    parse_disclosure_html_payload(
+        {
+            "input_directory": str(viewer_dir),
+            "output_directory": str(tmp_path),
+            "mode": "security_transaction",
+            "parser_method": "security_transaction",
+            "skip_errors": False,
+            "progress_interval": 2,
+        },
+        progress_callback=progress_log.append,
+    )
+
+    assert "파싱 중간 확인: 이번 실행 2건 처리." in progress_log
+    assert not any(
+        line.startswith("파싱 중간 확인") and "결과 JSON 저장 완료" in line
+        for line in progress_log
+    )
 
 
 def test_parse_disclosure_html_payload_defaults_progress_interval_to_1000(

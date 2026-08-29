@@ -26,3 +26,26 @@ test("HTML section preview preserves and indents structural TOC hierarchy", asyn
   assert.match(source, /item\.source_unavailable/);
   assert.match(source, /KIND 원본 없음/);
 });
+
+test("source-unavailable documents never request section splitting", async () => {
+  const pageSource = await readFile(pagePath, "utf8");
+  const resultsSource = await readFile(resultsPath, "utf8");
+
+  assert.match(pageSource, /if \(!document\.source_unavailable\) \{\s*void splitDocument\(document\)/);
+  assert.match(
+    resultsSource,
+    /disabled=\{!selectedDocument \|\| Boolean\(selectedDocument\.source_unavailable\)\}/,
+  );
+});
+
+test("HTML section mode changes refresh the mode-owned input and output paths", async () => {
+  const pageSource = await readFile(pagePath, "utf8");
+  const handler = pageSource.slice(
+    pageSource.indexOf("const handleFilterChange"),
+    pageSource.indexOf("const handleOutputDirectoryChange"),
+  );
+
+  assert.match(handler, /await saveSetting\("html_parse_mode", preset\.mode\)/);
+  assert.match(handler, /setInputDirectory\(settings\.internal_html_output_directory \|\| ""\)/);
+  assert.match(handler, /setOutputDirectory\(settings\.html_section_split_output_directory \|\| ""\)/);
+});

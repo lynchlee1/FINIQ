@@ -14,6 +14,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from finiq.config import PROJECT_ROOT
+from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.analytics.chart import (
     aggregate_price_dataframe,
     prepare_disclosure_dataframe,
@@ -222,6 +223,7 @@ def selected_disclosure_groups(disclosure_group: str) -> set[str] | None:
     return set(KIND_CATEGORY_GROUPS.get(selected, (selected,)))
 
 
+@sqlite_generation_locked
 def build_ontology_status(
     *,
     manifest_path: str | Path | None = None,
@@ -266,6 +268,7 @@ def build_ontology_status(
     }
 
 
+@sqlite_generation_locked
 def search_ontology_companies(
     *,
     manifest_path: str | Path | None = None,
@@ -673,6 +676,7 @@ def _after_close_count(disclosure_frame: pd.DataFrame) -> int:
     return int((disclosure_frame["trade_anchor_date"] > disclosure_frame["trade_date"]).sum())
 
 
+@sqlite_generation_locked
 def build_ontology_company_panel(
     *,
     manifest_path: str | Path | None = None,

@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+import shutil
 import threading
 from typing import Any
 import uuid
@@ -40,6 +42,7 @@ FILTER_STEP_STATUSES = {
 }
 _WORKFLOWS_LOCK = threading.RLock()
 _ACTIVE_RUNS: dict[str, str] = {}
+_WORKFLOW_TRANSACTION_FORMAT = "finiq_disclosure_filter_workflow_transaction_v1"
 
 
 def _integrity_error(message: str) -> ValueError:
@@ -262,7 +265,8 @@ def _read_workflow(
     document: dict[str, Any] | None = None,
     load_results: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    payload = _read_json_object(path) if document is None else document
+    recovered = path.name == "filter.json" and _recover_workflow_transaction(path)
+    payload = _read_json_object(path) if document is None or recovered else document
     if not isinstance(payload, dict) or payload.get("format") != FILTER_WORKFLOW_FORMAT:
         raise ValueError(f"Invalid disclosure filter workflow JSON: {path}")
     status = payload.get("status")
@@ -434,8 +438,6 @@ def _read_workflows(
                         workflow=workflow,
                     )
             except ValueError as error:
-                if require_workflow_format:
-                    raise
                 workflow = {
                     **workflow,
                     "status": "failed",
@@ -469,9 +471,121 @@ def _new_workflow_document(workflow: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
+def _workflow_transaction_path(path: Path) -> Path:
+    return path.with_name(".filter-workflow-transaction.json")
+
+
+def _recover_workflow_transaction(path: Path) -> bool:
+    transaction_path = _workflow_transaction_path(path)
+    if not transaction_path.is_file():
+        return False
+    transaction = _read_json_object(transaction_path)
+    if transaction.get("format") != _WORKFLOW_TRANSACTION_FORMAT:
+        raise ValueError(f"Invalid filter workflow transaction: {transaction_path}")
+    entries = transaction.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(
+            f"Invalid filter workflow transaction entries: {transaction_path}"
+        )
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"Invalid filter workflow transaction entry: {transaction_path}"
+            )
+        names = [
+            str(entry.get("target") or ""),
+            str(entry.get("staged") or ""),
+            str(entry.get("backup") or ""),
+        ]
+        if any(not name or Path(name).name != name for name in names):
+            raise ValueError(
+                f"Invalid filter workflow transaction path: {transaction_path}"
+            )
+        if not isinstance(entry.get("existed"), bool):
+            raise ValueError(
+                f"Invalid filter workflow transaction state: {transaction_path}"
+            )
+        target = path.parent / names[0]
+        backup = path.parent / names[2]
+        if entry.get("existed") is True:
+            if not backup.is_file():
+                raise ValueError(
+                    f"Filter workflow transaction backup is missing: {backup}"
+                )
+            restore = path.parent / f".{backup.name}.restore"
+            try:
+                shutil.copy2(backup, restore)
+                os.replace(restore, target)
+            finally:
+                restore.unlink(missing_ok=True)
+        else:
+            target.unlink(missing_ok=True)
+    for entry in entries:
+        (path.parent / str(entry["staged"])).unlink(missing_ok=True)
+        (path.parent / str(entry["backup"])).unlink(missing_ok=True)
+    transaction_path.unlink(missing_ok=True)
+    return True
+
+
+def _write_workflow_transaction(
+    path: Path,
+    writes: list[tuple[Path, dict[str, Any]]],
+) -> None:
+    _recover_workflow_transaction(path)
+    transaction_id = uuid.uuid4().hex
+    transaction_path = _workflow_transaction_path(path)
+    entries: list[dict[str, Any]] = []
+    try:
+        for index, (target, payload) in enumerate(writes):
+            if target.parent != path.parent:
+                raise ValueError(
+                    "filter workflow transaction targets must share a directory"
+                )
+            staged = path.parent / f".{target.name}.staged-{transaction_id}-{index}"
+            backup = path.parent / f".{target.name}.backup-{transaction_id}-{index}"
+            atomic_write_json(staged, payload)
+            existed = target.is_file()
+            entries.append(
+                {
+                    "target": target.name,
+                    "staged": staged.name,
+                    "backup": backup.name,
+                    "existed": existed,
+                }
+            )
+            if existed:
+                shutil.copy2(target, backup)
+                with backup.open("rb") as handle:
+                    os.fsync(handle.fileno())
+        atomic_write_json(
+            transaction_path,
+            {"format": _WORKFLOW_TRANSACTION_FORMAT, "entries": entries},
+        )
+        try:
+            for entry in entries:
+                os.replace(
+                    path.parent / str(entry["staged"]),
+                    path.parent / str(entry["target"]),
+                )
+        except Exception:
+            _recover_workflow_transaction(path)
+            raise
+        transaction_path.unlink()
+        for entry in entries:
+            (path.parent / str(entry["backup"])).unlink(missing_ok=True)
+    finally:
+        for entry in entries:
+            (path.parent / str(entry["staged"])).unlink(missing_ok=True)
+            if not transaction_path.exists():
+                (path.parent / str(entry["backup"])).unlink(missing_ok=True)
+
+
 def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    if path.name == "filter.json":
+        _recover_workflow_transaction(path)
     document = dict(payload)
+    sidecar_writes: list[tuple[Path, dict[str, Any]]] = []
 
     result = payload.get("result")
     if isinstance(result, dict):
@@ -482,7 +596,7 @@ def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
         canonical_result_file = "filtered.json"
         result_path = path.with_name(canonical_result_file)
         if result_file != canonical_result_file or not result_path.is_file():
-            atomic_write_json(result_path, result)
+            sidecar_writes.append((result_path, result))
         result_file = canonical_result_file
         document["result_file"] = result_file
         document["result_fingerprint"] = result_fingerprint
@@ -502,7 +616,7 @@ def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
         canonical_pending_file = "filter.pending.json"
         pending_path = path.with_name(canonical_pending_file)
         if pending_file != canonical_pending_file or not pending_path.is_file():
-            atomic_write_json(pending_path, pending)
+            sidecar_writes.append((pending_path, pending))
         pending_file = canonical_pending_file
         document["pending_file"] = pending_file
         document["pending_fingerprint"] = pending_fingerprint
@@ -518,7 +632,12 @@ def _write_workflow(path: Path, payload: dict[str, Any]) -> None:
 
     for key in [key for key in document if key.startswith("_")]:
         document.pop(key, None)
-    atomic_write_json(path, document)
+    if path.name == "filter.json" and sidecar_writes:
+        _write_workflow_transaction(path, [*sidecar_writes, (path, document)])
+    else:
+        for sidecar_path, sidecar_payload in sidecar_writes:
+            atomic_write_json(sidecar_path, sidecar_payload)
+        atomic_write_json(path, document)
     if path.name == "filter.json":
         referenced = {
             str(document.get("result_file") or ""),

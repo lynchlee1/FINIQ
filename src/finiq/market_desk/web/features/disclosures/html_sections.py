@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 import time
 from collections import deque
 from copy import deepcopy
@@ -32,6 +34,14 @@ _SECTIONS_STAGE_NAME = "06-sections"
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 DEFAULT_HTML_SECTION_PROBLEM_REPORT_LIMIT = 50
 T = TypeVar("T")
+
+
+class _NoHtmlSectionsError(ValueError):
+    pass
+
+
+class _SectionSaveCancelled(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -104,7 +114,11 @@ def _boundary_title(
     if not title and len(section_children) > 1:
         first_content = section_children[1]
         first_role = _toc_element_role(first_content)
-        if first_role == (kind, level):
+        if (
+            isinstance(first_content.tag, str)
+            and first_content.tag.lower() == "p"
+            and first_role == (kind, level)
+        ):
             title = _clean_text(first_content.text_content())
     if not title:
         raise ValueError("TOC boundary title is required")
@@ -249,6 +263,8 @@ def _section_container_and_boundaries(
             for index, (position, element) in enumerate(paragraph_elements, start=1)
         ], "paragraph"
 
+    if not xforms_wrappers:
+        raise _NoHtmlSectionsError("supported TOC structure is required")
     if len(xforms_wrappers) != 1:
         raise ValueError("supported TOC structure is required")
     wrapper_children = _element_children(xforms_wrappers[0])
@@ -283,7 +299,9 @@ def _section_plans(
     children = _element_children(container)
     plans: list[_HtmlSectionPlan] = []
     first_boundary = boundaries[0].position
-    preamble_title = _first_text_fragment(children[:first_boundary])
+    preamble_title = _clean_text(container.text) or _first_text_fragment(
+        children[:first_boundary]
+    )
     if preamble_title:
         plans.append(
             _HtmlSectionPlan(
@@ -363,6 +381,8 @@ def _render_section_plan(
     if len(cloned_containers) != 1:
         raise ValueError("section container clone is required")
     cloned_container = cloned_containers[0]
+    if plan.kind != "preamble":
+        cloned_container.text = None
     cloned_children = _element_children(cloned_container)
     for index in range(len(cloned_children) - 1, -1, -1):
         if index < plan.start or index >= plan.end:
@@ -523,28 +543,12 @@ def _map_html_files(
             submit_next()
 
 
-def _iter_html_files(input_directory: Path):
-    for child in sorted(input_directory.iterdir(), key=lambda path: path.name):
-        if child.is_dir():
-            if child.name.startswith("."):
-                continue
-            yield from _iter_html_files(child)
-        elif child.is_file() and child.suffix.lower() == ".html":
-            yield child
-
-
 def _collect_html_file_page(
     input_directory: Path, page: int, page_size: int
 ) -> tuple[list[Path], bool]:
     start = (page - 1) * page_size
     stop = start + page_size + 1
-    selected: list[Path] = []
-    for index, source_file in enumerate(_iter_html_files(input_directory)):
-        if index < start:
-            continue
-        if index >= stop:
-            break
-        selected.append(source_file)
+    selected = _collect_html_files(input_directory, None)[start:stop]
     return selected[:page_size], len(selected) > page_size
 
 
@@ -863,6 +867,16 @@ def inspect_disclosure_html_sections_payload(
             }
         try:
             sections = inspect_internal_html_sections(source_file.read_bytes())
+        except _NoHtmlSectionsError:
+            return {
+                "status": "no_sections",
+                "problem": {
+                    "kind": "no_sections",
+                    "source_file": str(source_file),
+                    "source_relative_path": source_relative_path,
+                    "error": "분리할 목차를 찾지 못했습니다.",
+                },
+            }
         except (OSError, UnicodeError, ValueError, etree.Error) as exc:
             return {
                 "status": "read_failed",
@@ -961,24 +975,157 @@ def inspect_disclosure_html_sections_payload(
 
 
 def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
-    files = sorted(
-        (
-            path
-            for path in input_directory.rglob("*")
-            if path.is_file()
-            and path.suffix.lower() == ".html"
-            and not any(
-                part.startswith(".")
-                for part in path.relative_to(input_directory).parts[:-1]
-            )
-        ),
-        key=lambda path: _relative_source_path(input_directory, path),
-    )
+    resolved_root = input_directory.resolve()
+    files: list[Path] = []
+    invalid_paths: list[str] = []
+    for path in input_directory.rglob("*"):
+        if not path.is_file() or path.suffix.lower() != ".html":
+            continue
+        relative_path = path.relative_to(input_directory)
+        if any(part.startswith(".") for part in relative_path.parts[:-1]):
+            continue
+        resolved_path = path.resolve()
+        try:
+            resolved_relative_path = resolved_path.relative_to(resolved_root)
+        except ValueError:
+            invalid_paths.append(relative_path.as_posix())
+            continue
+        if not (
+            len(resolved_relative_path.parts) == 2
+            and len(resolved_relative_path.parts[0]) == 4
+            and resolved_relative_path.parts[0].isdigit()
+        ):
+            invalid_paths.append(relative_path.as_posix())
+            continue
+        files.append(resolved_path)
+    if invalid_paths:
+        invalid_paths.sort()
+        raise ValueError(
+            "section input HTML must be stored at "
+            f"<YYYY>/<acpt_no>.html: {invalid_paths[0]}"
+        )
+    files.sort(key=lambda path: _relative_source_path(resolved_root, path))
+    stems: set[str] = set()
+    for path in files:
+        if path.stem in stems:
+            raise ValueError(f"duplicate HTML filename stem: {path.stem}")
+        stems.add(path.stem)
     return files[:limit] if limit is not None else files
 
 
 def _relative_source_path(input_directory: Path, source_file: Path) -> str:
     return source_file.relative_to(input_directory).as_posix()
+
+
+def _collect_output_html_paths(output_directory: Path) -> dict[str, Path]:
+    if not output_directory.is_dir():
+        return {}
+    paths: dict[str, Path] = {}
+    for root_raw, directory_names, filenames in os.walk(
+        output_directory,
+        followlinks=False,
+    ):
+        root = Path(root_raw)
+        for name in [*directory_names, *filenames]:
+            path = root / name
+            if path.is_symlink():
+                raise ValueError(
+                    f"section output must not contain symbolic links: {path}"
+                )
+        relative_root = root.relative_to(output_directory)
+        if any(part.startswith(".") for part in relative_root.parts):
+            directory_names[:] = []
+            continue
+        directory_names[:] = [
+            name for name in directory_names if not name.startswith(".")
+        ]
+        for filename in filenames:
+            path = root / filename
+            if path.suffix.lower() != ".html" or not path.is_file():
+                continue
+            paths[path.relative_to(output_directory).as_posix()] = path
+    return paths
+
+
+def _section_output_path(
+    output_directory: Path,
+    relative_path: Path,
+) -> Path:
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise ValueError("section output path must stay inside output_directory")
+    current = output_directory
+    for part in relative_path.parts:
+        current /= part
+        if current.is_symlink():
+            raise ValueError(
+                f"section output must not contain symbolic links: {current}"
+            )
+    return current
+
+
+def _publish_staged_section_outputs(
+    *,
+    staging_directory: Path,
+    output_directory: Path,
+    staged_results: list[dict[str, Any]],
+    expected_relative_paths: set[str],
+    all_expected_relative_paths: set[str],
+    cancel_check: Callable[[], bool] | None,
+) -> None:
+    unexpected = sorted(
+        set(_collect_output_html_paths(output_directory))
+        - all_expected_relative_paths
+    )
+    if unexpected:
+        raise ValueError(
+            "output_directory contains unexpected existing HTML: "
+            f"{unexpected[0]}"
+        )
+
+    backup_directory = staging_directory / ".backups"
+    entries: list[dict[str, Any]] = []
+    try:
+        output_directory.mkdir(parents=True, exist_ok=True)
+        for result in staged_results:
+            if _cancel_requested(cancel_check):
+                raise _SectionSaveCancelled
+            relative_path = Path(str(result["relative_path"]))
+            output_path = _section_output_path(output_directory, relative_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            backup_path: Path | None = None
+            if output_path.exists():
+                backup_path = backup_directory / relative_path
+                backup_path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(output_path, backup_path)
+            entry = {
+                "output": output_path,
+                "backup": backup_path,
+                "published": False,
+            }
+            entries.append(entry)
+            os.replace(Path(result["staged"]), output_path)
+            entry["published"] = True
+
+        if _cancel_requested(cancel_check):
+            raise _SectionSaveCancelled
+        actual_paths = _collect_output_html_paths(output_directory)
+        missing = sorted(expected_relative_paths - set(actual_paths))
+        unexpected = sorted(set(actual_paths) - all_expected_relative_paths)
+        if missing or unexpected:
+            problem = missing[0] if missing else unexpected[0]
+            raise ValueError(
+                f"section output integrity check failed: {problem}"
+            )
+    except Exception:
+        for entry in reversed(entries):
+            output_path = Path(entry["output"])
+            backup_path = entry["backup"]
+            if entry["published"] and output_path.exists():
+                output_path.unlink()
+            if isinstance(backup_path, Path) and backup_path.exists():
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(backup_path, output_path)
+        raise
 
 
 def _resolve_sections_output_directory(
@@ -1040,6 +1187,8 @@ def _render_without_section_plans(
     if len(cloned_containers) != 1:
         raise ValueError("section container clone is required")
     cloned_container = cloned_containers[0]
+    if any(plan.kind == "preamble" for plan in excluded_plans):
+        cloned_container.text = None
     cloned_children = _element_children(cloned_container)
     for index in range(len(cloned_children) - 1, -1, -1):
         if index in excluded_indexes:
@@ -1109,7 +1258,13 @@ def inspect_disclosure_html_section_output_payload(
     if not input_directory.is_dir():
         raise ValueError(f"input_directory does not exist: {input_directory}")
 
-    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    all_html_files = _collect_html_files(input_directory, None)
+    limit = _parse_limit(body.get("limit"))
+    html_files = all_html_files[:limit] if limit is not None else all_html_files
+    all_expected_relative_paths = {
+        _relative_source_path(input_directory, source_file)
+        for source_file in all_html_files
+    }
     workers = parse_html_section_worker_count(body.get("workers"))
     results = _map_html_files(
         html_files,
@@ -1120,19 +1275,7 @@ def inspect_disclosure_html_section_output_payload(
     if _cancel_requested(cancel_check):
         return {"cancelled": True}
 
-    actual_paths = (
-        {
-            path.relative_to(output_directory).as_posix(): path
-            for path in output_directory.rglob("*.html")
-            if path.is_file()
-            and not any(
-                part.startswith(".")
-                for part in path.relative_to(output_directory).parts[:-1]
-            )
-        }
-        if output_directory.is_dir()
-        else {}
-    )
+    actual_paths = _collect_output_html_paths(output_directory)
     expected_relative_paths: set[str] = set()
     problems: list[dict[str, str]] = []
     missing_files: list[str] = []
@@ -1163,7 +1306,7 @@ def inspect_disclosure_html_section_output_payload(
 
     missing_files.sort()
     mismatched_files.sort()
-    unexpected_files = sorted(set(actual_paths) - expected_relative_paths)
+    unexpected_files = sorted(set(actual_paths) - all_expected_relative_paths)
     integrity_ok = not (
         problems or missing_files or unexpected_files or mismatched_files
     )
@@ -1221,6 +1364,12 @@ def save_disclosure_html_sections_payload(
     if output_directory == input_directory:
         msg = "output_directory must be different from input_directory"
         raise ValueError(msg)
+    if output_directory.is_relative_to(input_directory):
+        raise ValueError("output_directory must not be inside input_directory")
+    if input_directory.is_relative_to(output_directory):
+        raise ValueError("input_directory must not be inside output_directory")
+    if output_directory.exists() and not output_directory.is_dir():
+        raise ValueError(f"output_directory is not a directory: {output_directory}")
 
     progress_log: deque[str] = deque(maxlen=200)
 
@@ -1231,7 +1380,26 @@ def save_disclosure_html_sections_payload(
 
     collect_started_at = time.monotonic()
     emit("입력 폴더에서 목차 분리 대상 HTML을 찾습니다.")
-    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    all_html_files = _collect_html_files(input_directory, None)
+    limit = _parse_limit(body.get("limit"))
+    html_files = all_html_files[:limit] if limit is not None else all_html_files
+    expected_relative_paths = {
+        _relative_source_path(input_directory, source_file)
+        for source_file in html_files
+    }
+    all_expected_relative_paths = {
+        _relative_source_path(input_directory, source_file)
+        for source_file in all_html_files
+    }
+    unexpected_existing = sorted(
+        set(_collect_output_html_paths(output_directory))
+        - all_expected_relative_paths
+    )
+    if unexpected_existing:
+        raise ValueError(
+            "output_directory contains unexpected existing HTML: "
+            f"{unexpected_existing[0]}"
+        )
     workers = parse_html_section_worker_count(body.get("workers"))
     progress_interval = _parse_section_progress_interval(
         body.get("progress_interval"), default=25
@@ -1257,56 +1425,86 @@ def save_disclosure_html_sections_payload(
     if _cancel_requested(cancel_check):
         return {"cancelled": True}
 
-    output_directory.mkdir(parents=True, exist_ok=True)
     saved_files: list[str] = []
     expected_files: list[str] = []
     skipped_files: list[dict[str, str]] = []
     removed_correction_sections = 0
     source_unavailable_files = 0
+    output_directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{output_directory.name}.part-",
+        dir=output_directory.parent,
+    ) as temporary_directory:
+        staging_directory = Path(temporary_directory)
 
-    def save_one(source_file: Path) -> dict[str, Any]:
-        selected = _automatic_section_output(source_file)
-        source_relative_path = source_file.relative_to(input_directory)
-        output_path = output_directory / source_relative_path
-        _reject_year_directly_under_sections_stage(output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(str(selected["content"]), encoding="utf-8")
-        return {
-            "status": "ok",
-            "saved": [str(output_path)],
-            "expected": [str(output_path)],
-            "removed_correction_sections": int(
-                selected["removed_correction_sections"]
-            ),
-            "source_unavailable": bool(selected.get("source_unavailable")),
-        }
+        def save_one(source_file: Path) -> dict[str, Any]:
+            selected = _automatic_section_output(source_file)
+            source_relative_path = source_file.relative_to(input_directory)
+            staged_path = staging_directory / source_relative_path
+            output_path = _section_output_path(
+                output_directory,
+                source_relative_path,
+            )
+            _reject_year_directly_under_sections_stage(output_path)
+            staged_path.parent.mkdir(parents=True, exist_ok=True)
+            staged_path.write_text(str(selected["content"]), encoding="utf-8")
+            return {
+                "status": "ok",
+                "staged": staged_path,
+                "relative_path": source_relative_path.as_posix(),
+                "saved": [str(output_path)],
+                "expected": [str(output_path)],
+                "removed_correction_sections": int(
+                    selected["removed_correction_sections"]
+                ),
+                "source_unavailable": bool(selected.get("source_unavailable")),
+            }
 
-    results = _map_html_files(html_files, workers, save_one, cancel_check)
-    for index, result in enumerate(results, start=1):
-        if _cancel_requested(cancel_check):
-            return {"cancelled": True}
-        if result["status"] == "ok":
+        staged_results: list[dict[str, Any]] = []
+        results = _map_html_files(html_files, workers, save_one, cancel_check)
+        for index, result in enumerate(results, start=1):
+            if _cancel_requested(cancel_check):
+                return {"cancelled": True}
+            staged_results.append(result)
             saved_files.extend(result["saved"])
             expected_files.extend(result["expected"])
             removed_correction_sections += int(
                 result.get("removed_correction_sections") or 0
             )
             source_unavailable_files += int(bool(result.get("source_unavailable")))
-        else:
-            skipped_files.append(result["skipped"])
-            source_name = Path(result["skipped"]["source_file"]).name
-            emit(f"목차 저장 제외 {index}/{len(html_files)}: {source_name}")
-        if (
-            index == 1
-            or index == len(html_files)
-            or index % progress_interval == 0
-        ):
-            emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
+            if (
+                index == 1
+                or index == len(html_files)
+                or index % progress_interval == 0
+            ):
+                emit(f"목차 저장 중간 확인: {index}/{len(html_files)}건 처리.")
+        if _cancel_requested(cancel_check):
+            return {"cancelled": True}
+        try:
+            _publish_staged_section_outputs(
+                staging_directory=staging_directory,
+                output_directory=output_directory,
+                staged_results=staged_results,
+                expected_relative_paths=expected_relative_paths,
+                all_expected_relative_paths=all_expected_relative_paths,
+                cancel_check=cancel_check,
+            )
+        except _SectionSaveCancelled:
+            return {"cancelled": True}
 
     missing_files = [path for path in expected_files if not Path(path).is_file()]
+    unexpected_files = sorted(
+        set(_collect_output_html_paths(output_directory))
+        - all_expected_relative_paths
+    )
+    if missing_files or unexpected_files:
+        problem = missing_files[0] if missing_files else unexpected_files[0]
+        raise ValueError(f"section output integrity check failed: {problem}")
     emit(f"목차 HTML 저장 완료: {len(saved_files)}건")
     emit(
-        f"무결성 검사 완료: 저장 대상 {len(expected_files)}건, 저장 완료 {len(saved_files)}건, 누락 {len(missing_files)}건"
+        f"무결성 검사 완료: 저장 대상 {len(expected_files)}건, "
+        f"저장 완료 {len(saved_files)}건, 누락 {len(missing_files)}건, "
+        f"예상 밖 파일 {len(unexpected_files)}건"
     )
     return {
         "format": "finiq_disclosure_html_section_save_v2",
@@ -1317,15 +1515,16 @@ def save_disclosure_html_sections_payload(
             "saved_files": len(saved_files),
             "skipped_files": len(skipped_files),
             "expected_files": len(expected_files),
-            "integrity_ok": len(saved_files) == len(expected_files)
-            and not missing_files,
+            "integrity_ok": True,
             "missing_files": len(missing_files),
+            "unexpected_files": len(unexpected_files),
             "removed_correction_sections": removed_correction_sections,
             "source_unavailable_files": source_unavailable_files,
         },
         "saved_files": saved_files,
         "expected_files": expected_files,
         "missing_files": missing_files,
+        "unexpected_files": unexpected_files,
         "skipped_files": skipped_files,
         "progress_log": list(progress_log),
     }

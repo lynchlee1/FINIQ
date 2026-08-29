@@ -4,6 +4,7 @@ from datetime import date
 import json
 from pathlib import Path
 import sqlite3
+import threading
 
 import pandas as pd
 import pytest
@@ -19,8 +20,62 @@ from finiq.market_desk.analytics.ontology_graph import (
     build_ontology_status,
     search_ontology_companies,
 )
+from finiq.market_desk.sqlite_generation import SQLITE_GENERATION_LOCK
 from finiq.market_desk.web.routers import market_data as market_data_router
 from finiq.market_desk.web.routers.market_data import create_market_data_router
+
+
+def test_analytics_manifest_readers_wait_for_generation_publication(
+    tmp_path: Path,
+) -> None:
+    missing_manifest = tmp_path / "missing-manifest.json"
+    missing_quanti = tmp_path / "missing-quanti"
+    callbacks = [
+        lambda: build_ontology_status(
+            manifest_path=missing_manifest,
+            quanti_dir=missing_quanti,
+        ),
+        lambda: search_ontology_companies(
+            manifest_path=missing_manifest,
+            quanti_dir=missing_quanti,
+        ),
+        lambda: build_ontology_company_panel(
+            manifest_path=missing_manifest,
+            quanti_dir=missing_quanti,
+            company_id="005930",
+        ),
+        lambda: triple_barrier.run_triple_barrier_analysis(
+            manifest_path=missing_manifest,
+            quanti_dir=missing_quanti,
+            company_id="005930",
+        ),
+        lambda: triple_barrier.get_triple_barrier_results_payload(
+            manifest_path=missing_manifest,
+            company_id="005930",
+        ),
+    ]
+
+    for callback in callbacks:
+        started = threading.Event()
+        finished = threading.Event()
+
+        def read_manifest() -> None:
+            started.set()
+            try:
+                callback()
+            except (OSError, ValueError):
+                pass
+            finally:
+                finished.set()
+
+        with SQLITE_GENERATION_LOCK:
+            reader = threading.Thread(target=read_manifest)
+            reader.start()
+            assert started.wait(timeout=5)
+            assert not finished.wait(timeout=0.05)
+        reader.join(timeout=5)
+        assert not reader.is_alive()
+        assert finished.is_set()
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

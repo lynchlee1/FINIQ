@@ -63,6 +63,11 @@ test("reload restores the inspection payload paired with the restored job", asyn
   assert.match(polling, /setIsPollingRestored\(true\)/);
   assert.match(source, /if \(isPollingRestored && !loading && !activeJobId && activeInspection\?\.jobId\)/);
   assert.match(source, /await startDownloadJob\(completedPayload, jobId\)[\s\S]{0,300}clearActiveInspection\(completedInspection\)/);
+  const unmountCleanup = source.slice(
+    source.indexOf("useEffect(() => () => {"),
+    source.indexOf("  useEffect(() => {", source.indexOf("useEffect(() => () => {") + 1),
+  );
+  assert.doesNotMatch(unmountCleanup, /cancelDownload\(|clearActiveInspection\(/);
 });
 
 test("transient polling failures keep the active job and retry it", async () => {

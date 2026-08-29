@@ -87,7 +87,7 @@
 #### Behavior
 
 - `skip_errors=True`일 때만 실패 파일의 일부 결과와 warning을 버리고 다음 파일을 처리한다.
-- `progress_interval`마다 현재 record·warning·error를 결과 JSON에 중간 저장한다.
+- `progress_interval`마다 진행 로그를 남긴다. `skip_errors=True`일 때만 현재 record·warning·error도 결과 JSON에 중간 저장한다.
 - `errors[]`에는 선택 순서와 전체 수, mode, 파일명에서 읽은 `acpt_no`, `error_type`, 오류 문장을 기록한다.
 
 #### Defaults and Exceptions

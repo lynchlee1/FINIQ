@@ -84,6 +84,7 @@ def _filter_result_payload(
     return payload
 
 
+@sqlite_generation_locked
 def filter_disclosures_payload(
     body: dict[str, Any],
     *,
@@ -306,6 +307,7 @@ def filter_disclosures_payload(
     )
 
 
+@sqlite_generation_locked
 def search_disclosure_titles_payload(
     body: dict[str, Any],
     *,

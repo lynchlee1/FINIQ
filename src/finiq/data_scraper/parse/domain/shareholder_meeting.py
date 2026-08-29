@@ -104,14 +104,29 @@ def _cell_value(cell: Tag) -> dict[str, Any]:
     }
 
 
+def _direct_table_rows(table: Tag) -> list[Tag]:
+    rows: list[Tag] = []
+    for child in table.children:
+        if not isinstance(child, Tag):
+            continue
+        if child.name == "tr":
+            rows.append(child)
+        elif child.name in {"thead", "tbody", "tfoot"}:
+            rows.extend(child.find_all("tr", recursive=False))
+    return rows
+
+
 def _expanded_table(table: Tag) -> list[list[dict[str, Any] | None]]:
     """Expand spans while retaining each source cell's line boundaries."""
-    rows = table.find_all("tr")
+    rows = _direct_table_rows(table)
     if not rows:
         return []
     max_cols = max(
         (
-            sum(max(int(cell.get("colspan", 1)), 1) for cell in row.find_all(["th", "td"]))
+            sum(
+                max(int(cell.get("colspan", 1)), 1)
+                for cell in row.find_all(["th", "td"], recursive=False)
+            )
             for row in rows
         ),
         default=0,
@@ -123,7 +138,7 @@ def _expanded_table(table: Tag) -> list[list[dict[str, Any] | None]]:
     ]
     for row_index, row in enumerate(rows):
         column_index = 0
-        for cell in row.find_all(["th", "td"]):
+        for cell in row.find_all(["th", "td"], recursive=False):
             while column_index < max_cols and grid[row_index][column_index] is not None:
                 column_index += 1
             if column_index >= max_cols:

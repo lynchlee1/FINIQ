@@ -146,7 +146,10 @@ class DisclosureWorkspace:
             "internal": {
                 mode: str(self.internal_mode(mode)) for mode in normalized_modes
             },
-            "sections": str(self.sections),
+            "sections_root": str(self.sections),
+            "sections": {
+                mode: str(self.sections_mode(mode)) for mode in normalized_modes
+            },
             "converted_root": str(self.converted),
             "converted": {
                 mode: str(self.converted_mode(mode)) for mode in normalized_modes

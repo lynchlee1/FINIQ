@@ -1270,15 +1270,17 @@ def _parse_one_html_file(
         )
 
     state.processed_this_run += 1
-    if (
-        request.skip_errors
-        and state.processed_this_run % request.progress_interval == 0
-    ):
-        _write_parse_payload(
-            _payload_from_state(request, state, cancelled=False), request.output_path
-        )
+    if state.processed_this_run % request.progress_interval == 0:
+        if request.skip_errors:
+            _write_parse_payload(
+                _payload_from_state(request, state, cancelled=False),
+                request.output_path,
+            )
+            suffix = ", 결과 JSON 저장 완료."
+        else:
+            suffix = "."
         state.emit(
-            f"파싱 중간 확인: 이번 실행 {state.processed_this_run}건 처리, 결과 JSON 저장 완료."
+            f"파싱 중간 확인: 이번 실행 {state.processed_this_run}건 처리{suffix}"
         )
 
 
@@ -1369,15 +1371,17 @@ def _record_parallel_parse_result(
         )
 
     state.processed_this_run += 1
-    if (
-        request.skip_errors
-        and state.processed_this_run % request.progress_interval == 0
-    ):
-        _write_parse_payload(
-            _payload_from_state(request, state, cancelled=False), request.output_path
-        )
+    if state.processed_this_run % request.progress_interval == 0:
+        if request.skip_errors:
+            _write_parse_payload(
+                _payload_from_state(request, state, cancelled=False),
+                request.output_path,
+            )
+            suffix = ", 결과 JSON 저장 완료."
+        else:
+            suffix = "."
         state.emit(
-            f"파싱 중간 확인: 이번 실행 {state.processed_this_run}건 처리, 결과 JSON 저장 완료."
+            f"파싱 중간 확인: 이번 실행 {state.processed_this_run}건 처리{suffix}"
         )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+import os
 import tempfile
 
 from finiq.concurrency import bounded_as_completed
@@ -130,11 +131,14 @@ def rebuild_invalid_disclosure_external_html_compress_payload(
                 "data_root": data_root,
                 "mode": mode,
                 "parallel_workers": body.get("parallel_workers"),
+                "progress_interval": body.get("progress_interval"),
             },
         )
         try:
             result = compress_disclosure_external_html_payload(
-                payload, progress_callback=progress_callback
+                payload,
+                progress_callback=progress_callback,
+                cancel_check=cancel_check,
             )
             results.append({"mode": mode, "passed": True, **result})
         except Exception as exc:
@@ -268,8 +272,14 @@ def inspect_disclosure_external_html_compress_payload(
 def compress_disclosure_external_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Extract compact metadata from downloaded KIND external HTML files into one JSON."""
+    def ensure_not_cancelled() -> None:
+        if cancel_check is not None and cancel_check():
+            raise InterruptedError("external HTML compression cancelled")
+
+    ensure_not_cancelled()
     if "source_directory" in body:
         raise ValueError(
             "source_directory is not supported; use input_directory"
@@ -288,6 +298,7 @@ def compress_disclosure_external_html_payload(
     output_directory = Path(output_directory_raw).expanduser().resolve()
 
     if body.get("parent_mode") not in (None, ""):
+        ensure_not_cancelled()
         workspace = resolve_disclosure_workspace(body.get("data_root") or "")
         mode = validate_workspace_mode(body.get("mode"))
         parent_mode = validate_workspace_mode(body.get("parent_mode"))
@@ -365,6 +376,7 @@ def compress_disclosure_external_html_payload(
                 "parent compressed external HTML is stale for derived targets: "
                 + ", ".join(mismatched[:10])
             )
+        ensure_not_cancelled()
         return {
             "format": "finiq_disclosure_external_html_compress_result_v1",
             "mode": mode,
@@ -450,7 +462,9 @@ def compress_disclosure_external_html_payload(
             (index, year, html_path)
             for index, (year, html_path) in enumerate(html_files)
         ):
+            ensure_not_cancelled()
             index, year, acpt_no, record = _compress_external_html_file(args)
+            ensure_not_cancelled()
             expected_acpt_no = html_files[index][1].stem
             record["metadata"] = metadata[expected_acpt_no]
             record["title"] = str(metadata[expected_acpt_no].get("title") or "")
@@ -473,7 +487,9 @@ def compress_disclosure_external_html_payload(
                 max_pending=worker_count * 2,
             )
             for completed_count, (future, _item) in enumerate(completed, start=1):
+                ensure_not_cancelled()
                 index, year, acpt_no, record = future.result()
+                ensure_not_cancelled()
                 expected_acpt_no = html_files[index][1].stem
                 record["metadata"] = metadata[expected_acpt_no]
                 record["title"] = str(metadata[expected_acpt_no].get("title") or "")
@@ -525,17 +541,25 @@ def compress_disclosure_external_html_payload(
         raise ValueError(
             "External HTML compression membership does not match input filenames"
         )
-    output_directory.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(output_path, payload)
+    ensure_not_cancelled()
+    output_directory.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".finiq-external-html-compress-",
+        dir=output_directory.parent,
+    ) as staging_directory:
+        staged_path = Path(staging_directory) / output_path.name
+        atomic_write_json(staged_path, payload)
+        verification = _verify_compressed_external_html_files(
+            written_files=[str(staged_path)],
+            expected_acpt_numbers=expected_acpt_numbers,
+        )
+        if not verification["passed"]:
+            raise ValueError("External HTML compression verification failed")
+        ensure_not_cancelled()
+        output_directory.mkdir(parents=True, exist_ok=True)
+        os.replace(staged_path, output_path)
     written_files.append(str(output_path))
     emit(f"외부 HTML 압축 JSON 저장 완료: {output_path}")
-
-    verification = _verify_compressed_external_html_files(
-        written_files=written_files,
-        expected_acpt_numbers=expected_acpt_numbers,
-    )
-    if not verification["passed"]:
-        raise ValueError("External HTML compression verification failed")
     emit(
         "외부 HTML 압축 결과 재검사: "
         f"{verification['verified_records']}/{verification['expected_records']}건 확인, "

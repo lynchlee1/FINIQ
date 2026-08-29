@@ -249,10 +249,11 @@ def create_config_router(config: Any, choose_finder_path: ChooseFinderPath = _ch
             except ValueError:
                 return value
             resolved = Path(value).expanduser().resolve()
-            stage = workspace.sections.resolve()
-            if resolved != stage and stage not in resolved.parents:
+            stage = workspace.root / "06-sections"
+            resolved_stage = stage.resolve()
+            if resolved != resolved_stage and resolved_stage not in resolved.parents:
                 return value
-            return str(workspace.sections_mode(config.html_parse_mode))
+            return str(stage / config.html_parse_mode)
 
         payload = {
             "parallel_worker_count": available_cpu_count(),

@@ -119,6 +119,10 @@ test("HTML inspection always derives its mode-owned paths from the workspace", a
 
 test("HTML problem-file notices require visible confirmation and limit details", async () => {
   const htmlDownload = await readFile(paths.htmlDownload, "utf8");
+  const cleanupPayload = htmlDownload.slice(
+    htmlDownload.indexOf("  const buildCleanupPayload"),
+    htmlDownload.indexOf("\n\n  useEffect", htmlDownload.indexOf("  const buildCleanupPayload")),
+  );
 
   assert.match(htmlDownload, /useState\("20"\)/);
   assert.match(htmlDownload, /label: "문제 파일 표시 수"/);
@@ -130,6 +134,21 @@ test("HTML problem-file notices require visible confirmation and limit details",
   assert.match(htmlDownload, /deleteConfirmed && deleteConfirmationText\.trim\(\) === "확인했습니다\." && \(/);
   assert.doesNotMatch(htmlDownload, /JSON\.stringify\(lastInspectionResult/);
   assert.match(htmlDownload, /나머지 \{formatInteger\(omittedProblemFileCount\)\}개는 표시하지 않았습니다/);
+  assert.doesNotMatch(cleanupPayload, /\blimit:/);
+  assert.match(cleanupPayload, /deletion_confirmation: lastInspectionResult\.deletion_confirmation/);
+});
+
+test("HTML cancellation stops both the request token and the background job", async () => {
+  const htmlDownload = await readFile(paths.htmlDownload, "utf8");
+  const cancelHandler = htmlDownload.slice(
+    htmlDownload.indexOf("  const handleCancel = async"),
+    htmlDownload.indexOf("\n\n  const handleCompressExternalHtml", htmlDownload.indexOf("  const handleCancel = async")),
+  );
+
+  assert.match(cancelHandler, /fetch\(variantConfig\.cancelEndpoint/);
+  assert.match(cancelHandler, /fetch\("\/api\/utility\/cancel"/);
+  assert.match(cancelHandler, /JSON\.stringify\(\{ job_id: activeJobId \}\)/);
+  assert.match(cancelHandler, /await Promise\.all\(cancelRequests\)/);
 });
 
 test("completed disclosure inspections reuse their result control for another inspection", async () => {
@@ -203,7 +222,12 @@ test("changing a main or detail page immediately cancels its running inspection"
   assert.match(hook, /inspect: \(payload: TPayload, signal: AbortSignal\)/);
   assert.match(hook, /useEffect\(\(\) => \(\) => \{\s*abortControllerRef\.current\?\.abort\(\);/);
   assert.match(hook, /const clear = useCallback\(\(\) => \{\s*abortControllerRef\.current\?\.abort\(\);/);
-  assert.match(download, /useEffect\(\(\) => \(\) => \{[\s\S]{0,260}cancelDownload\(activeInspection\.jobId\)/);
+  const downloadUnmount = download.slice(
+    download.indexOf("  useEffect(() => () => {"),
+    download.indexOf("\n\n", download.indexOf("  useEffect(() => () => {")),
+  );
+  assert.match(downloadUnmount, /metadataInspectionAbortControllerRef\.current\?\.abort\(\)/);
+  assert.doesNotMatch(downloadUnmount, /cancelDownload\(|clearActiveInspection\(/);
   assert.match(download, /const inspectionJobId = window\.crypto\.randomUUID\(\)\.replaceAll\("-", ""\)/);
   assert.match(download, /job_id: inspectionJobId/);
   assert.match(filter, /inspectionAbortControllerRef\.current\?\.abort\(\);[\s\S]{0,260}\[rootDirectory, taskMode\]/);

@@ -41,7 +41,7 @@
 | `compressed_metadata_path` | 파일 경로 | 제목, 본문 문서번호, 정정공시 묶음을 연결할 압축 metadata |
 | `parent_mode` | 문자열 | 파생 필터일 때 상위 기본 필터 mode |
 | `limit` | 1 이상의 정수 | 정렬된 입력 중 앞에서 몇 건을 처리할지 제한; 기본값은 제한 없음 |
-| `progress_interval` | 1 이상의 정수 | `1000`; `skip_errors=true`일 때 이 건수마다 중간 결과를 저장 |
+| `progress_interval` | 1 이상의 정수 | `1000`; 이 건수마다 진행 로그를 남기고 `skip_errors=true`일 때 중간 결과도 저장 |
 | `parallel_workers` | 1 이상의 정수 | 기본값은 가용 CPU 수이며 입력 파일 수를 넘지 않음 |
 | `cancel_token` | 문자열 | 실행 중인 작업과 취소 요청을 연결하는 값 |
 | `filter_blocks` | 배열 | 공시 metadata 조건; 기본값은 빈 배열 |
