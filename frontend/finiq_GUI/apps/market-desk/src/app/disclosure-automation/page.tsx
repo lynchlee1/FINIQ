@@ -93,8 +93,8 @@ type WorkspaceInspection = { stage: InspectionStage };
 
 type DownloadConflict = {
   range: string;
-  saved_pages?: number | null;
-  kind_pages?: number | null;
+  saved_count?: number | null;
+  kind_count?: number | null;
   reason: string;
 };
 
@@ -272,7 +272,7 @@ export default function DisclosureAutomationPage() {
         const conflicts = result.download_conflicts || [];
         setDownloadConflicts(conflicts);
         setDownloadConfirmation(result.download_confirmation || "");
-        setNotification(`페이지 수 충돌 ${formatInteger(conflicts.length)}개를 확인하세요.`);
+        setNotification(`건수 충돌 ${formatInteger(conflicts.length)}개를 확인하세요.`);
         setIsErrorStatus(false);
         return;
       }
@@ -713,7 +713,7 @@ export default function DisclosureAutomationPage() {
         ? "success"
         : "neutral";
   const notificationResetKey = `${notification}:${downloadConfirmation}:${downloadConflicts
-    .map((conflict) => `${conflict.range}:${conflict.reason}:${conflict.saved_pages ?? ""}:${conflict.kind_pages ?? ""}`)
+    .map((conflict) => `${conflict.range}:${conflict.reason}:${conflict.saved_count ?? ""}:${conflict.kind_count ?? ""}`)
     .join("|")}`;
 
   if (initializationError) throw initializationError;
@@ -915,11 +915,11 @@ export default function DisclosureAutomationPage() {
                   {downloadConflicts.map((conflict) => <li key={conflict.range} className="rounded-md border border-[color:var(--tv-warning)] bg-[var(--tv-warning-soft)] p-3 text-[var(--tv-warning-text)]">
                     <p className="font-medium">{conflict.range}</p>
                     <p>{conflict.reason}</p>
-                    {conflict.saved_pages != null || conflict.kind_pages != null ? <p>저장 {conflict.saved_pages ?? "확인 불가"}페이지 · KIND {conflict.kind_pages ?? "확인 불가"}페이지</p> : null}
+                    {conflict.saved_count != null || conflict.kind_count != null ? <p>저장 {conflict.saved_count ?? "확인 불가"}건 · KIND {conflict.kind_count ?? "확인 불가"}건</p> : null}
                   </li>)}
                 </ul>
                 <Button onClick={confirmDownloadConflicts} disabled={!!activeJobId || !downloadConfirmation}>
-                  <RefreshCw className="mr-2 h-4 w-4" />전체 다시 받기
+                  <RefreshCw className="mr-2 h-4 w-4" />다시 받기
                 </Button>
               </> : null}
             </div>
