@@ -35,6 +35,7 @@ def _inspection_manifest() -> dict[str, object]:
         "schema_version": table_export.TABLE_SCHEMA_VERSION,
         "source_type": "source_folder",
         "table_name": "disclosures",
+        "content_fingerprint": "a" * 64,
         "summary": {
             "companies": 1,
             "source_rows": 2,
@@ -170,6 +171,11 @@ def test_table_inspection_confirms_source_manifest_and_shards(
     monkeypatch.setattr(table_export, "_validate_sqlite_manifest_counts", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         table_export,
+        "_sqlite_manifest_content_fingerprints",
+        lambda *_args, **_kwargs: ("a" * 64, None),
+    )
+    monkeypatch.setattr(
+        table_export,
         "_inspect_source_folder_counts",
         lambda *_args, **_kwargs: ({"2026": (1, 1)}, 1, 1, 2, 1, 1, pages),
     )
@@ -206,6 +212,11 @@ def test_table_inspection_rejects_stale_manifest_summary(
     )
     monkeypatch.setattr(table_export, "_load_sqlite_manifest", lambda _path: stale_manifest)
     monkeypatch.setattr(table_export, "_validate_sqlite_manifest_counts", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        table_export,
+        "_sqlite_manifest_content_fingerprints",
+        lambda *_args, **_kwargs: ("a" * 64, None),
+    )
     monkeypatch.setattr(
         table_export,
         "_inspect_source_folder_counts",

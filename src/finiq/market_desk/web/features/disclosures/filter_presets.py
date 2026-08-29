@@ -62,6 +62,14 @@ def _normalize_condition_input(value: object) -> dict[str, Any]:
         isinstance(block, dict) for block in condition_blocks
     ):
         raise ValueError("filter workflow condition_blocks must be a list of objects")
+    for index, block in enumerate(condition_blocks):
+        connector = block.get("connector")
+        if (index == 0 and connector not in {None, ""}) or (
+            index > 0 and connector not in {"AND", "OR"}
+        ):
+            raise ValueError(
+                f"filter workflow condition_blocks[{index}].connector is invalid"
+            )
     mode = validate_workspace_mode(value.get("mode"))
     parent_value = value.get("parent_mode")
     parent_mode = (
@@ -167,6 +175,15 @@ def _validate_filter_result(
 ) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("format") != FILTER_RESULT_FORMAT:
         raise ValueError("filter workflow result has an invalid format")
+    source_fingerprint = str(payload.get("source_fingerprint") or "").strip()
+    if (
+        len(source_fingerprint) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in source_fingerprint
+        )
+    ):
+        raise ValueError("filter workflow result source_fingerprint is invalid")
     filters = payload.get("filters")
     if not isinstance(filters, dict) or filters.get("filter_blocks") != condition_blocks:
         raise ValueError("filter workflow result conditions do not match the workflow")
@@ -927,6 +944,7 @@ def _merge_filter_results(
     result = {
         "format": FILTER_RESULT_FORMAT,
         "source_type": latest_payload.get("source_type") or "sqlite_manifest",
+        "source_fingerprint": latest_payload["source_fingerprint"],
         "filters": filters,
         "summary": {
             "source_disclosures": source_disclosures,
@@ -991,8 +1009,16 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
             else None
         )
         pending_result = _pending_result(document)
+        source_expected_fingerprint = (
+            str(committed_result.get("source_fingerprint") or "")
+            if isinstance(committed_result, dict)
+            else None
+        )
         if pending_result is not None:
             source_expected_count = _filter_result_counts(pending_result)[0]
+            source_expected_fingerprint = str(
+                pending_result.get("source_fingerprint") or ""
+            )
             source_offset += _filter_result_counts(pending_result)[3]
 
         run_id = uuid.uuid4().hex
@@ -1015,6 +1041,7 @@ def begin_filter_workflow_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "run_id": run_id,
         "source_offset": source_offset,
         "source_expected_count": source_expected_count,
+        "source_expected_fingerprint": source_expected_fingerprint,
     }
     if parent_result is not None:
         response["parent_acpt_numbers"] = [
@@ -1080,10 +1107,7 @@ def complete_filter_workflow_payload(
         pending_result = _pending_result(document)
         if pending_result is not None:
             result_payloads.append(pending_result)
-        if current_source_offset == 0 and any(
-            _result_source_count(payload) != source_disclosures
-            for payload in result_payloads
-        ):
+        if current_source_offset == 0:
             result_payloads = []
         result_payloads.append(current_result)
         merged_result = _merge_filter_results(
@@ -1169,10 +1193,7 @@ def interrupt_filter_workflow_payload(
             for payload in [committed_result, previous_pending]
             if isinstance(payload, dict)
         ]
-        if current_source_offset == 0 and any(
-            _result_source_count(payload) != source_disclosures
-            for payload in prior_payloads
-        ):
+        if current_source_offset == 0 and prior_payloads:
             _set_workflow_result(document, None)
             committed_count = 0
             pending_payloads = []

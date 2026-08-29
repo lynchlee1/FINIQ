@@ -10,7 +10,7 @@ import tempfile
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,6 +21,8 @@ from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.web.features.market_data.service_sources import (
     _load_sqlite_manifest,
     _parse_source_body_page_file,
+    _sqlite_manifest_content_fingerprints,
+    _validate_sqlite_manifest_content_fingerprint,
     _validate_sqlite_manifest_counts,
 )
 
@@ -43,6 +45,23 @@ class _SourceInventory:
 
 def _date_part(value: object) -> str:
     return str(value or "").strip().split(" ", 1)[0]
+
+
+def _validated_disclosed_date(value: object) -> str:
+    disclosed_date = _date_part(value)
+    try:
+        parsed = date.fromisoformat(disclosed_date)
+    except ValueError as exc:
+        raise ValueError(
+            "disclosed_at must begin with a valid YYYY-MM-DD calendar date: "
+            f"{value!r}"
+        ) from exc
+    if parsed.isoformat() != disclosed_date:
+        raise ValueError(
+            "disclosed_at must begin with a valid YYYY-MM-DD calendar date: "
+            f"{value!r}"
+        )
+    return disclosed_date
 
 
 def _normalize_table_name(value: object) -> str:
@@ -207,6 +226,7 @@ def _collect_source_folder_rows_by_year(
                 continue
             seen_acpt_nos.add(acpt_no)
             disclosed_at = record.get("disclosed_at")
+            disclosed_date = _validated_disclosed_date(disclosed_at)
             row = {
                 "row_no": record.get("row_no"),
                 "company_key": record.get("company_key"),
@@ -218,7 +238,7 @@ def _collect_source_folder_rows_by_year(
                     list(record.get("badges") or []), ensure_ascii=False
                 ),
                 "disclosed_at": disclosed_at,
-                "disclosed_date": _date_part(disclosed_at),
+                "disclosed_date": disclosed_date,
                 "title": record.get("title"),
                 "title_attr": record.get("title_attr"),
                 "title_base": record.get("title_base"),
@@ -353,7 +373,11 @@ def _inspect_source_folder_counts(
                 unlinked_disclosure_count += 1
 
             year = _row_year(
-                {"disclosed_date": _date_part(record.get("disclosed_at"))}
+                {
+                    "disclosed_date": _validated_disclosed_date(
+                        record.get("disclosed_at")
+                    )
+                }
             )
             disclosures, unlinked = shard_counts.get(year, (0, 0))
             shard_counts[year] = (
@@ -1028,6 +1052,10 @@ def build_disclosure_table_payload(
             "pages": pages,
             "shards": shards,
         }
+        manifest["content_fingerprint"] = _sqlite_manifest_content_fingerprints(
+            staged_root / MANIFEST_FILENAME,
+            manifest,
+        )[0]
         _write_manifest(staged_root / MANIFEST_FILENAME, manifest)
         _raise_if_cancelled(cancel_check)
         cleanup_warnings.extend(
@@ -1101,6 +1129,15 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             manifest_path,
             manifest,
             filter_workers=body.get("table_workers"),
+        )
+        actual_content_fingerprint = _sqlite_manifest_content_fingerprints(
+            manifest_path,
+            manifest,
+        )[0]
+        _validate_sqlite_manifest_content_fingerprint(
+            manifest_path,
+            manifest,
+            actual_fingerprint=actual_content_fingerprint,
         )
 
         source_body_paths = source_inventory.body_paths

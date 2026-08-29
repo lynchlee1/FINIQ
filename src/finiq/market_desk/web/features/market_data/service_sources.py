@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from finiq.data_scraper.parse import (
     disclosure_file_rows,
     disclosure_rows,
@@ -228,6 +230,7 @@ def _iter_sqlite_manifest_disclosure_records(
     manifest: dict[str, Any],
     *,
     offset: int = 0,
+    prepare: bool = True,
 ) -> Any:
     if offset < 0:
         raise ValueError("SQLite disclosure offset must be >= 0")
@@ -299,9 +302,90 @@ def _iter_sqlite_manifest_disclosure_records(
                     if isinstance(parsed_badges, list)
                     else []
                 )
-                yield _prepare_filter_record(record)
+                yield _prepare_filter_record(record) if prepare else record
         finally:
             connection.close()
+
+
+_SQLITE_CONTENT_FINGERPRINT_FIELDS = (
+    "row_no",
+    "company_key",
+    "company_name",
+    "company_id",
+    "company_cell_text",
+    "market",
+    "badges_json",
+    "disclosed_at",
+    "disclosed_date",
+    "title",
+    "title_attr",
+    "title_base",
+    "title_display",
+    "title_flags_json",
+    "is_correction_report",
+    "has_later_correction",
+    "acpt_no",
+    "doc_no",
+    "submitter",
+)
+
+
+def _sqlite_manifest_content_fingerprints(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    prefix_count: int | None = None,
+) -> tuple[str, str | None]:
+    """Hash canonical SQLite row content and an optional leading row prefix."""
+    if prefix_count is not None and prefix_count < 0:
+        raise ValueError("SQLite fingerprint prefix count must be >= 0")
+
+    digest = hashlib.sha256()
+    prefix_fingerprint = digest.hexdigest() if prefix_count == 0 else None
+    row_count = 0
+    for record in _iter_sqlite_manifest_disclosure_records(
+        manifest_path,
+        manifest,
+        prepare=False,
+    ):
+        canonical = json.dumps(
+            [record.get(field) for field in _SQLITE_CONTENT_FINGERPRINT_FIELDS],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest.update(canonical)
+        digest.update(b"\n")
+        row_count += 1
+        if row_count == prefix_count:
+            prefix_fingerprint = digest.hexdigest()
+
+    if prefix_count is not None and prefix_count > row_count:
+        prefix_fingerprint = None
+    return digest.hexdigest(), prefix_fingerprint
+
+
+def _validate_sqlite_manifest_content_fingerprint(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    actual_fingerprint: str,
+) -> None:
+    expected_fingerprint = str(manifest.get("content_fingerprint") or "").strip()
+    if (
+        len(expected_fingerprint) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in expected_fingerprint
+        )
+    ):
+        raise ValueError(
+            f"SQLite manifest content_fingerprint is invalid: {manifest_path}"
+        )
+    if actual_fingerprint != expected_fingerprint:
+        raise ValueError(
+            "SQLite manifest content fingerprint does not match the actual shards: "
+            f"{manifest_path}"
+        )
 
 
 def _sqlite_badges_predicate(
@@ -503,10 +587,7 @@ def _parse_sql_boolean_tokens(tokens: list[object]) -> tuple[str, list[str]]:
     ) -> tuple[str, list[str]]:
         left_sql, left_parameters = left
         right_sql, right_parameters = right
-        if operator == "XOR":
-            sql = f"(({left_sql}) != ({right_sql}))"
-        else:
-            sql = f"(({left_sql}) {operator} ({right_sql}))"
+        sql = f"(({left_sql}) {operator} ({right_sql}))"
         return sql, [*left_parameters, *right_parameters]
 
     def parse_factor() -> tuple[str, list[str]]:
@@ -534,18 +615,11 @@ def _parse_sql_boolean_tokens(tokens: list[object]) -> tuple[str, list[str]]:
             result = combine(result, "AND", parse_factor())
         return result
 
-    def parse_xor() -> tuple[str, list[str]]:
-        result = parse_and()
-        while peek() == "XOR":
-            consume()
-            result = combine(result, "XOR", parse_and())
-        return result
-
     def parse_or() -> tuple[str, list[str]]:
-        result = parse_xor()
+        result = parse_and()
         while peek() == "OR":
             consume()
-            result = combine(result, "OR", parse_xor())
+            result = combine(result, "OR", parse_and())
         return result
 
     result = parse_or()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -56,6 +57,9 @@ def _filter_result(
     return {
         "format": "kind_disclosure_filter_v1",
         "source_type": "sqlite_manifest",
+        "source_fingerprint": hashlib.sha256(
+            str(source_disclosures).encode("ascii")
+        ).hexdigest(),
         "source_sqlite_manifest_path": "/tmp/sqlite_manifest.json",
         "filters": {"filter_blocks": condition_blocks or []},
         "summary": {
@@ -984,6 +988,7 @@ def test_filter_workflow_preserves_result_and_processes_only_new_rows(
     )
     assert second_run["source_offset"] == 2
     assert second_run["source_expected_count"] == 2
+    assert second_run["source_expected_fingerprint"] == first["source_fingerprint"]
     assert workflow_path.read_text(encoding="utf-8") == completed_before_save
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
@@ -1054,6 +1059,7 @@ def test_filter_workflow_resumes_interrupted_rows_without_reprocessing(
     )
     assert resumed_run["source_offset"] == 2
     assert resumed_run["source_expected_count"] == 4
+    assert resumed_run["source_expected_fingerprint"] == partial["source_fingerprint"]
     filter_presets.mark_filter_workflow_query_completed(
         data_root=data_root,
         mode="bond_issuance",
@@ -1265,6 +1271,43 @@ def test_filter_workflow_accepts_text_acpt_no() -> None:
     )
 
     assert validated["disclosures"][0]["acpt_no"] == "20250101A00001"
+
+
+def test_filter_workflow_rejects_invalid_source_fingerprint() -> None:
+    result = _filter_result(
+        source_disclosures=0,
+        source_offset=0,
+        disclosures=[],
+    )
+    result["source_fingerprint"] = "not-a-sha256"
+
+    with pytest.raises(ValueError, match="source_fingerprint is invalid"):
+        filter_presets._validate_filter_result(
+            result,
+            condition_blocks=[],
+            require_complete=True,
+        )
+
+
+def test_filter_workflow_rejects_xor_connector_when_saved(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="connector is invalid"):
+        _save_filter_workflow(
+            tmp_path,
+            condition_blocks=[
+                {
+                    "connector": "",
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "전환사채",
+                },
+                {
+                    "connector": "XOR",
+                    "field": "title",
+                    "operator": "contains",
+                    "value": "신주인수권",
+                },
+            ],
+        )
 
 
 def test_filter_workflow_rejects_missing_acpt_no() -> None:

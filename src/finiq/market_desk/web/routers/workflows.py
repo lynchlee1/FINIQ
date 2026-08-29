@@ -336,6 +336,9 @@ def create_workflows_router(
             body["source_expected_count"] = workflow_run[
                 "source_expected_count"
             ]
+            body["source_expected_fingerprint"] = workflow_run[
+                "source_expected_fingerprint"
+            ]
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         accept = request.headers.get("Accept", "")

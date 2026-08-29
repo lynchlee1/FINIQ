@@ -397,8 +397,8 @@ test("disclosure filter auto-loads workspace JSON presets without a load button"
   assert.match(conditionCardSource, /onClick=\{onSavePreset\}/);
   assert.doesNotMatch(conditionCardSource, /onRenamePreset/);
   assert.match(conditionCardSource, /onClick=\{onDeletePreset\} disabled=\{!presets\.some\(\(preset\) => \(getPresetIdentity\?\.\(preset\) \?\? preset\.name\) === selectedPreset\)\}/);
-  assert.match(conditionCardSource, /DisclosureFilterConnector = "" \| "AND" \| "XOR" \| "OR"/);
-  assert.match(conditionCardSource, /<option value="XOR">XOR<\/option>/);
+  assert.match(conditionCardSource, /DisclosureFilterConnector = "" \| "AND" \| "OR"/);
+  assert.doesNotMatch(conditionCardSource, /<option value="XOR">XOR<\/option>/);
   assert.match(conditionCardSource, /mixed condition block connectors must be separated by parentheses/);
 });
 

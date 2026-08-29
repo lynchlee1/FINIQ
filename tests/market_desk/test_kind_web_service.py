@@ -15,6 +15,9 @@ import pytest
 
 import finiq.market_desk.web.features.disclosures.table_export as table_export_module
 import finiq.market_desk.web.features.disclosures.html_common as html_common_module
+from finiq.market_desk.web.features.disclosures import (
+    internal_html_download as internal_html_download_module,
+)
 import finiq.market_desk.web.features.market_data.service_payloads as service_payloads_module
 import finiq.market_desk.web.features.market_data.service_sources as service_sources_module
 from finiq.config import QUANTI_DIR, STOCK_DATA_DIR
@@ -598,36 +601,40 @@ def _write_filter_manifest_fixture(
         for year, rows in sorted(rows_by_year.items())
     ]
     row_count = sum(len(rows) for rows in rows_by_year.values())
-    table_export_module._write_manifest(
-        manifest_path,
-        {
-            "format": "finiq_disclosure_table_manifest_v1",
-            "schema_version": 3,
-            "source_type": "source_folder",
-            "source_path": str(tmp_path),
-            "manifest_path": str(manifest_path),
-            "shard_root": str(table_root),
-            "table_name": "disclosures",
-            "summary": {
-                "companies": len(company_keys),
-                "source_rows": row_count,
-                "duplicate_rows": 0,
-                "disclosures": row_count,
-                "unlinked_disclosures": 0,
-                "shards": len(shards),
-            },
-            "pages": [
-                {
-                    "source_file": "fixture.body",
-                    "source_page": 1,
-                    "source_rows": row_count,
-                    "written_rows": row_count,
-                    "duplicate_rows": 0,
-                }
-            ],
-            "shards": shards,
+    manifest = {
+        "format": "finiq_disclosure_table_manifest_v1",
+        "schema_version": 3,
+        "source_type": "source_folder",
+        "source_path": str(tmp_path),
+        "manifest_path": str(manifest_path),
+        "shard_root": str(table_root),
+        "table_name": "disclosures",
+        "summary": {
+            "companies": len(company_keys),
+            "source_rows": row_count,
+            "duplicate_rows": 0,
+            "disclosures": row_count,
+            "unlinked_disclosures": 0,
+            "shards": len(shards),
         },
+        "pages": [
+            {
+                "source_file": "fixture.body",
+                "source_page": 1,
+                "source_rows": row_count,
+                "written_rows": row_count,
+                "duplicate_rows": 0,
+            }
+        ],
+        "shards": shards,
+    }
+    manifest["content_fingerprint"] = (
+        service_sources_module._sqlite_manifest_content_fingerprints(
+            manifest_path,
+            manifest,
+        )[0]
     )
+    table_export_module._write_manifest(manifest_path, manifest)
     return manifest_path
 
 
@@ -714,6 +721,9 @@ def test_filter_disclosures_payload_filters_by_title_and_date(tmp_path: Path) ->
     )
 
     assert payload["format"] == "kind_disclosure_filter_v1"
+    assert payload["source_fingerprint"] == json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )["content_fingerprint"]
     assert payload["summary"]["matched_disclosures"] == 1
     assert payload["disclosures"][0]["acpt_no"] == "1"
     assert payload["disclosures"][0]["company_name"] == "테스트전자"
@@ -806,13 +816,17 @@ def test_search_disclosure_titles_payload_applies_shared_boolean_conditions_in_s
 def test_filter_disclosures_payload_filters_only_rows_after_source_offset(
     tmp_path: Path,
 ) -> None:
-    _write_filter_manifest_fixture(tmp_path)
+    manifest_path = _write_filter_manifest_fixture(tmp_path)
+    source_fingerprint = json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )["content_fingerprint"]
 
     payload = filter_disclosures_payload(
         {
             "data_root": str(tmp_path),
             "source_offset": 2,
             "source_expected_count": 3,
+            "source_expected_fingerprint": source_fingerprint,
         }
     )
 
@@ -854,7 +868,56 @@ def test_filter_disclosures_payload_offset_skips_complete_year_shards(
     disclosures[0]["disclosed_at"] = "2024-01-02 09:00:00"
     disclosures[1]["disclosed_at"] = "2025-01-10 09:00:00"
     disclosures[2]["disclosed_at"] = "2026-01-15 09:00:00"
-    _write_filter_manifest_fixture(tmp_path, source)
+    manifest_path = _write_filter_manifest_fixture(tmp_path, source)
+    source_fingerprint = json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )["content_fingerprint"]
+
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "source_offset": 2,
+            "source_expected_count": 3,
+            "source_expected_fingerprint": source_fingerprint,
+        }
+    )
+
+    assert payload["summary"]["target_disclosures"] == 1
+    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3"]
+
+
+def test_filter_disclosures_payload_continues_after_unchanged_prefix(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_filter_manifest_fixture(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _full_fingerprint, prefix_fingerprint = (
+        service_sources_module._sqlite_manifest_content_fingerprints(
+            manifest_path,
+            manifest,
+            prefix_count=2,
+        )
+    )
+    assert prefix_fingerprint is not None
+
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "source_offset": 2,
+            "source_expected_count": 2,
+            "source_expected_fingerprint": prefix_fingerprint,
+        }
+    )
+
+    assert payload["summary"]["source_offset"] == 2
+    assert payload["summary"]["target_disclosures"] == 1
+    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3"]
+
+
+def test_filter_disclosures_payload_does_not_reuse_offset_without_fingerprint(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
 
     payload = filter_disclosures_payload(
         {
@@ -864,28 +927,59 @@ def test_filter_disclosures_payload_offset_skips_complete_year_shards(
         }
     )
 
-    assert payload["summary"]["target_disclosures"] == 1
-    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3"]
+    assert payload["summary"]["source_offset"] == 0
+    assert payload["summary"]["target_disclosures"] == 3
 
 
-@pytest.mark.parametrize("previous_count", [2, 4])
-def test_filter_disclosures_payload_retries_from_start_when_source_count_changes(
+def test_filter_disclosures_payload_retries_from_start_when_same_count_content_changes(
     tmp_path: Path,
-    previous_count: int,
 ) -> None:
-    _write_filter_manifest_fixture(tmp_path)
+    manifest_path = _write_filter_manifest_fixture(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    previous_fingerprint = manifest["content_fingerprint"]
+    shard_path = manifest_path.parent / manifest["shards"][0]["relative_path"]
+    connection = sqlite3.connect(shard_path)
+    try:
+        connection.execute("UPDATE disclosures SET title = '교체된 공시' WHERE id = 1")
+        connection.commit()
+    finally:
+        connection.close()
+    manifest["content_fingerprint"] = (
+        service_sources_module._sqlite_manifest_content_fingerprints(
+            manifest_path,
+            manifest,
+        )[0]
+    )
+    table_export_module._write_manifest(manifest_path, manifest)
 
     payload = filter_disclosures_payload(
         {
             "data_root": str(tmp_path),
-            "source_offset": 2,
-            "source_expected_count": previous_count,
+            "source_offset": 3,
+            "source_expected_count": 3,
+            "source_expected_fingerprint": previous_fingerprint,
         }
     )
 
     assert payload["summary"]["source_offset"] == 0
     assert payload["summary"]["target_disclosures"] == 3
-    assert [row["acpt_no"] for row in payload["disclosures"]] == ["3", "2", "1"]
+
+
+def test_filter_disclosures_payload_rejects_sqlite_content_changed_without_manifest(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_filter_manifest_fixture(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    shard_path = manifest_path.parent / manifest["shards"][0]["relative_path"]
+    connection = sqlite3.connect(shard_path)
+    try:
+        connection.execute("UPDATE disclosures SET title = '몰래 바뀐 공시' WHERE id = 1")
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(ValueError, match="content fingerprint does not match"):
+        filter_disclosures_payload({"data_root": str(tmp_path)})
 
 
 def test_filter_disclosures_payload_returns_integrity_checked_partial_on_cancel(
@@ -1500,44 +1594,28 @@ def test_filter_disclosures_payload_supports_field_filter_blocks(tmp_path: Path)
     assert [disclosure["acpt_no"] for disclosure in payload["disclosures"]] == ["3", "1"]
 
 
-def test_disclosure_filters_support_xor_in_records_and_title_search(
+def test_disclosure_filters_reject_xor_in_records_and_title_search(
     tmp_path: Path,
 ) -> None:
     _write_filter_manifest_fixture(tmp_path)
     filter_blocks = [
-        _filter_block(
-            open_count=1,
-            field="title",
-            operator="contains",
-            value="전환사채",
-        ),
+        _filter_block(field="title", operator="contains", value="전환사채"),
         _filter_block(
             connector="XOR",
             field="title",
             operator="contains",
             value="기타",
-            close_count=1,
-        ),
-        _filter_block(
-            connector="AND",
-            field="market",
-            operator="equals",
-            value="코스피",
         ),
     ]
 
-    filtered = filter_disclosures_payload(
-        {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
-    )
-    searched = search_disclosure_titles_payload(
-        {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
-    )
-
-    assert [row["acpt_no"] for row in filtered["disclosures"]] == ["2", "1"]
-    assert searched["titles"] == [
-        {"title": "[정정]전환사채발행결정", "disclosures": 1},
-        {"title": "기타 주요경영사항", "disclosures": 1},
-    ]
+    with pytest.raises(ValueError, match="connector is invalid"):
+        filter_disclosures_payload(
+            {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+        )
+    with pytest.raises(ValueError, match="connector is invalid"):
+        search_disclosure_titles_payload(
+            {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+        )
 
 
 def test_disclosure_filters_reject_mixed_connectors_without_grouping(
@@ -1547,7 +1625,7 @@ def test_disclosure_filters_reject_mixed_connectors_without_grouping(
     filter_blocks = [
         _filter_block(field="title", operator="contains", value="전환사채"),
         _filter_block(
-            connector="XOR",
+            connector="OR",
             field="title",
             operator="contains",
             value="기타",
@@ -1823,6 +1901,7 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert payload["output_path"] == str(manifest_path.resolve())
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["format"] == "finiq_disclosure_table_manifest_v1"
+    assert len(manifest["content_fingerprint"]) == 64
     assert "source_path" not in manifest
     assert "manifest_path" not in manifest
     assert "shard_root" not in manifest
@@ -1860,6 +1939,51 @@ def test_build_disclosure_table_payload_writes_yearly_sqlite_manifest(tmp_path: 
     assert metadata["shard_year"] == "2025"
     assert metadata["table_name"] == "disclosures"
     assert metadata["unlinked_disclosures"] == "0"
+
+
+def test_build_disclosure_table_payload_rejects_invalid_calendar_date(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "2025-01-02 09:00",
+            "2025-02-30 09:00",
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="valid YYYY-MM-DD calendar date"):
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(tmp_path / "02-table"),
+            }
+        )
+
+
+def test_disclosure_table_content_fingerprint_does_not_depend_on_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    fingerprints: list[str] = []
+    for directory_name in ("first", "second"):
+        work_root = tmp_path / directory_name
+        work_root.mkdir()
+        source_root = _write_source_body_fixture(work_root)
+        output_root = work_root / "02-table"
+        build_disclosure_table_payload(
+            {
+                "root_directory": str(source_root),
+                "output_path": str(output_root),
+            }
+        )
+        manifest = json.loads(
+            (output_root / "sqlite_manifest.json").read_text(encoding="utf-8")
+        )
+        fingerprints.append(manifest["content_fingerprint"])
+
+    assert fingerprints[0] == fingerprints[1]
 
 
 def test_table_build_publish_failure_preserves_previous_shards_and_manifest(
@@ -3305,9 +3429,14 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
         lambda **_kwargs: [],
     )
+    def missing_content_path(*_args: object, **_kwargs: object) -> bytes:
+        raise internal_html_download_module._ContentPathMissingError(
+            "content path not found"
+        )
+
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
-        lambda *_args, **_kwargs: b"",
+        missing_content_path,
     )
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download.wait_for_html_download_request_slot",
@@ -3331,7 +3460,7 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
     manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
     assert manifest["disclosures"][0]["source_unavailable"] == {
         "doc_no": doc_no,
-        "reason": "invalid_html",
+        "reason": "content_path_missing",
     }
     assert len(manifest["disclosures"][0]["source_sha256"]) == 64
     placeholder_path = output_directory / "2025" / f"{acpt_no}.html"
@@ -3395,7 +3524,7 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
     assert parsed["records"][0]["acpt_no"] == acpt_no
     assert parsed["records"][0]["source_unavailable"] == {
         "doc_no": doc_no,
-        "reason": "invalid_html",
+        "reason": "content_path_missing",
     }
 
     compressed_payload["records"][0]["selected_main_doc_no"] = "20250101000888"
@@ -3470,7 +3599,7 @@ def test_source_unavailable_placeholder_receipt_must_match_filename(
         _render_internal_html_source_unavailable_placeholder(
             acpt_no=embedded_acpt_no,
             doc_no=doc_no,
-            reason="invalid_html",
+            reason="content_path_missing",
         )
     )
 
@@ -3540,7 +3669,7 @@ def test_failed_placeholder_refresh_reports_membership_error(
         _render_internal_html_source_unavailable_placeholder(
             acpt_no=acpt_no,
             doc_no=doc_no,
-            reason="invalid_html",
+            reason="content_path_missing",
         )
     )
     write_disclosure_html_manifest_payload(
@@ -3553,7 +3682,7 @@ def test_failed_placeholder_refresh_reports_membership_error(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["disclosures"][0]["source_unavailable"] = {
         "doc_no": doc_no,
-        "reason": "invalid_html",
+        "reason": "content_path_missing",
     }
     manifest["disclosures"][0]["source_sha256"] = "0" * 64
     manifest["disclosures"][0]["source_size_bytes"] = placeholder_path.stat().st_size
@@ -6691,7 +6820,7 @@ def test_html_section_inspection_counts_source_unavailable_as_expected(
         _render_internal_html_source_unavailable_placeholder(
             acpt_no=source_file.stem,
             doc_no="20260401000002",
-            reason="invalid_html",
+            reason="content_path_missing",
         )
     )
 
@@ -6713,7 +6842,10 @@ def test_html_section_inspection_counts_source_unavailable_as_expected(
         {"input_directory": str(input_directory)}
     )
     assert listed["summary"]["source_unavailable_files"] == 1
-    assert listed["documents"][0]["source_unavailable"]["reason"] == "invalid_html"
+    assert (
+        listed["documents"][0]["source_unavailable"]["reason"]
+        == "content_path_missing"
+    )
     assert listed["documents"][0]["toc_count"] == 0
 
 
@@ -7140,7 +7272,7 @@ def test_section_save_ignores_automation_cache_below_standard_input(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "05-internal-html-download"
-    output_directory = tmp_path / "06-sections"
+    output_directory = tmp_path / "06-sections" / "bond_issuance"
     visible = input_directory / "2026" / "20260101000001.html"
     hidden = input_directory / ".automation-current" / "20260101000002.html"
     visible.parent.mkdir(parents=True)
@@ -7159,9 +7291,9 @@ def test_section_save_ignores_automation_cache_below_standard_input(
     )
 
     assert result["summary"]["found_files"] == 1
-    assert result["output_directory"] == str(output_directory / "bond_issuance")
-    assert (output_directory / "bond_issuance" / "2026" / visible.name).is_file()
-    assert not (output_directory / "2026").exists()
+    assert result["output_directory"] == str(output_directory)
+    assert (output_directory / "2026" / visible.name).is_file()
+    assert not (output_directory.parent / "2026").exists()
     assert not (output_directory / ".automation-current" / hidden.name).exists()
 
 
@@ -7169,7 +7301,7 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "05-internal-html-download"
-    output_directory = tmp_path / "06-sections"
+    output_directory = tmp_path / "06-sections" / "bond_issuance"
     source_directory = input_directory / "2013"
     source_directory.mkdir(parents=True)
     source_file = source_directory / "20130416000360.html"
@@ -7223,7 +7355,7 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
             },
         }
     )
-    section_file = output_directory / "bond_issuance" / "2013" / source_file.name
+    section_file = output_directory / "2013" / source_file.name
     section_html = section_file.read_text(encoding="utf-8")
 
     assert "정정신고" not in section_html
@@ -7248,7 +7380,7 @@ def test_section_save_never_discards_correction_word_after_first_section(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "05-internal-html-download"
-    output_directory = tmp_path / "06-sections"
+    output_directory = tmp_path / "06-sections" / "bond_issuance"
     source_file = input_directory / "2026" / "20260828000001.html"
     source_file.parent.mkdir(parents=True)
     source_file.write_text(
@@ -7271,7 +7403,7 @@ def test_section_save_never_discards_correction_word_after_first_section(
         }
     )
     output = (
-        output_directory / "bond_issuance" / "2026" / source_file.name
+        output_directory / "2026" / source_file.name
     ).read_text(encoding="utf-8")
 
     assert result["summary"]["removed_correction_sections"] == 0
@@ -7314,7 +7446,7 @@ def test_section_save_preserves_single_legacy_correction_disclosure(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "05-internal-html-download"
-    output_directory = tmp_path / "06-sections"
+    output_directory = tmp_path / "06-sections" / "rights_issuance"
     source_file = input_directory / "1997" / "19970407M00015.html"
     source_file.parent.mkdir(parents=True)
     source_file.write_text(
@@ -7332,7 +7464,7 @@ def test_section_save_preserves_single_legacy_correction_disclosure(
         }
     )
     output = (
-        output_directory / "rights_issuance" / "1997" / source_file.name
+        output_directory / "1997" / source_file.name
     ).read_text(encoding="utf-8")
 
     assert result["summary"]["saved_files"] == 1

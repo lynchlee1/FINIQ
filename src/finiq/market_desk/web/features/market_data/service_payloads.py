@@ -43,12 +43,14 @@ def _filter_result_payload(
     ],
     include_external_html_download_acpt_numbers: bool,
     complete: bool,
+    source_fingerprint: str,
 ) -> dict[str, Any]:
     filtered.sort(key=_record_sort_key, reverse=True)
     public_disclosures = [_public_disclosure_record(record) for record in filtered]
     payload = {
         "format": "kind_disclosure_filter_v1",
         "source_type": source_kind,
+        "source_fingerprint": source_fingerprint,
         "filters": filters,
         "summary": {
             "source_disclosures": source_disclosures,
@@ -144,6 +146,20 @@ def filter_disclosures_payload(
     )
     if source_expected_count is not None and source_expected_count < source_offset:
         raise ValueError("source_expected_count must be >= source_offset")
+    source_expected_fingerprint_value = body.get("source_expected_fingerprint")
+    source_expected_fingerprint = (
+        str(source_expected_fingerprint_value or "").strip()
+        if source_expected_fingerprint_value is not None
+        else None
+    )
+    if source_expected_fingerprint is not None and (
+        len(source_expected_fingerprint) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in source_expected_fingerprint
+        )
+    ):
+        raise ValueError("source_expected_fingerprint must be a lowercase SHA-256")
 
     sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
     try:
@@ -158,7 +174,23 @@ def filter_disclosures_payload(
             "01단계부터 다시 실행하세요."
         ) from exc
     total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
-    if source_expected_count is not None and total_records != source_expected_count:
+    source_fingerprint, expected_prefix_fingerprint = (
+        _sqlite_manifest_content_fingerprints(
+            sqlite_manifest_path,
+            sqlite_manifest,
+            prefix_count=source_expected_count,
+        )
+    )
+    _validate_sqlite_manifest_content_fingerprint(
+        sqlite_manifest_path,
+        sqlite_manifest,
+        actual_fingerprint=source_fingerprint,
+    )
+    if source_offset > 0 and (
+        source_expected_count is None
+        or source_expected_fingerprint is None
+        or expected_prefix_fingerprint != source_expected_fingerprint
+    ):
         source_offset = 0
     target_records = total_records - source_offset
     records = _iter_sqlite_manifest_disclosure_records(
@@ -209,6 +241,7 @@ def filter_disclosures_payload(
                         include_external_html_download_acpt_numbers
                     ),
                     complete=False,
+                    source_fingerprint=source_fingerprint,
                 ),
             )
         inspected_count = index
@@ -304,6 +337,7 @@ def filter_disclosures_payload(
             include_external_html_download_acpt_numbers
         ),
         complete=True,
+        source_fingerprint=source_fingerprint,
     )
 
 
@@ -329,6 +363,15 @@ def search_disclosure_titles_payload(
         sqlite_manifest_path,
         sqlite_manifest,
         filter_workers=filter_workers,
+    )
+    actual_content_fingerprint = _sqlite_manifest_content_fingerprints(
+        sqlite_manifest_path,
+        sqlite_manifest,
+    )[0]
+    _validate_sqlite_manifest_content_fingerprint(
+        sqlite_manifest_path,
+        sqlite_manifest,
+        actual_fingerprint=actual_content_fingerprint,
     )
     matched_disclosures, title_counts = _search_sqlite_manifest_titles(
         sqlite_manifest_path,
