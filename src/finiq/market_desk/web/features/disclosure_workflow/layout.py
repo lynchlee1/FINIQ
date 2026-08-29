@@ -461,8 +461,11 @@ def _is_under_workspace_sections(
     if not raw:
         return False
     resolved = Path(raw).expanduser().resolve()
-    stage = workspace.sections.resolve()
-    return resolved == stage or stage in resolved.parents
+    stages = {
+        (workspace.root / "06-sections").resolve(),
+        workspace.sections.resolve(),
+    }
+    return any(resolved == stage or stage in resolved.parents for stage in stages)
 
 
 def _assign_sections_mode_directory(
@@ -475,10 +478,27 @@ def _assign_sections_mode_directory(
     linked: bool,
 ) -> None:
     provided = str(payload.get(key) or "").strip()
-    if linked or not provided or _is_under_workspace_sections(workspace, provided):
-        payload[key] = str(
-            workspace.sections_owner_mode(mode, parent_mode=parent_mode)
-        )
+    provided_is_workspace_path = bool(
+        provided and _is_under_workspace_sections(workspace, provided)
+    )
+    if provided and not provided_is_workspace_path and not linked:
+        return
+    expected = workspace.sections_owner_mode(
+        mode, parent_mode=parent_mode
+    ).resolve()
+    if not provided:
+        payload[key] = str(expected)
+        return
+    if provided_is_workspace_path:
+        resolved = Path(provided).expanduser().resolve()
+        if resolved != expected:
+            raise ValueError(
+                f"{key} must use the owner mode directory: {expected}"
+            )
+        payload[key] = str(expected)
+        return
+    if linked:
+        payload[key] = str(expected)
 
 
 def apply_workspace_defaults(

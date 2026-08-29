@@ -1158,7 +1158,12 @@ def _resolve_sections_output_directory(
         raise ValueError(
             "06-sections HTML must be stored at <mode>/<YYYY>/<acpt_no>.html"
         )
-    return stage / validate_workspace_mode(mode)
+    expected = (stage / validate_workspace_mode(mode)).resolve()
+    if output_directory != expected:
+        raise ValueError(
+            f"output_directory must use the owner mode directory: {expected}"
+        )
+    return output_directory
 
 
 def _reject_year_directly_under_sections_stage(output_path: Path) -> None:

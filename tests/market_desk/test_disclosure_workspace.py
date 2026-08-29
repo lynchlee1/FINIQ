@@ -644,7 +644,7 @@ def test_workspace_section_save_writes_under_mode_not_year_root(
     assert not (data_root / "06-sections" / "2026").exists()
 
 
-def test_workspace_section_save_rewrites_stage_root_output_to_mode(
+def test_workspace_section_save_rejects_stage_root_output(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
@@ -666,28 +666,24 @@ def test_workspace_section_save_rewrites_stage_root_output_to_mode(
         encoding="utf-8",
     )
 
-    result = save_disclosure_html_sections_payload(
-        {
-            "data_root": str(data_root),
-            "mode": "bond_issuance",
-            "input_directory": str(
-                data_root / "05-internal-html-download" / "bond_issuance"
-            ),
-            "output_directory": str(data_root / "06-sections"),
-        }
-    )
+    with pytest.raises(ValueError, match="owner mode directory"):
+        save_disclosure_html_sections_payload(
+            {
+                "data_root": str(data_root),
+                "mode": "bond_issuance",
+                "input_directory": str(
+                    data_root / "05-internal-html-download" / "bond_issuance"
+                ),
+                "output_directory": str(data_root / "06-sections"),
+            }
+        )
 
-    saved = (
+    assert not (
         data_root / "06-sections" / "bond_issuance" / "2026" / source.name
-    )
-    assert result["output_directory"] == str(
-        data_root / "06-sections" / "bond_issuance"
-    )
-    assert saved.is_file()
-    assert not (data_root / "06-sections" / "2026").exists()
+    ).exists()
 
 
-def test_workspace_section_save_creates_current_mode_not_previous_mode(
+def test_workspace_section_save_rejects_previous_mode_output(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
@@ -725,17 +721,22 @@ def test_workspace_section_save_creates_current_mode_not_previous_mode(
             "data_root": str(data_root),
             "mode": "bond_issuance",
             "input_directory": str(bond_source.parent.parent),
-            "output_directory": str(data_root / "06-sections"),
+            "output_directory": str(
+                data_root / "06-sections" / "bond_issuance"
+            ),
         }
     )
-    result = save_disclosure_html_sections_payload(
-        {
-            "data_root": str(data_root),
-            "mode": "shareholder_meeting",
-            "input_directory": str(meeting_source.parent.parent),
-            "output_directory": str(data_root / "06-sections" / "bond_issuance"),
-        }
-    )
+    with pytest.raises(ValueError, match="owner mode directory"):
+        save_disclosure_html_sections_payload(
+            {
+                "data_root": str(data_root),
+                "mode": "shareholder_meeting",
+                "input_directory": str(meeting_source.parent.parent),
+                "output_directory": str(
+                    data_root / "06-sections" / "bond_issuance"
+                ),
+            }
+        )
 
     meeting_saved = (
         data_root
@@ -744,10 +745,7 @@ def test_workspace_section_save_creates_current_mode_not_previous_mode(
         / "2026"
         / meeting_source.name
     )
-    assert result["output_directory"] == str(
-        data_root / "06-sections" / "shareholder_meeting"
-    )
-    assert meeting_saved.is_file()
+    assert not meeting_saved.exists()
     assert (
         data_root / "06-sections" / "bond_issuance" / "2026" / bond_source.name
     ).is_file()
@@ -779,19 +777,17 @@ def test_section_save_rejects_year_directly_under_sections_stage_without_mode(
     assert not (tmp_path / "06-sections" / "2026").exists()
 
 
-def test_workspace_parse_rewrites_stage_root_input_to_mode(tmp_path: Path) -> None:
+def test_workspace_parse_rejects_stage_root_input(tmp_path: Path) -> None:
     workspace = resolve_disclosure_workspace(tmp_path / "workspace", create=True)
-    payload = apply_workspace_defaults(
-        "parse",
-        {
-            "data_root": str(workspace.root),
-            "mode": "bond_issuance",
-            "input_directory": str(workspace.sections),
-        },
-    )
-    assert payload["input_directory"] == str(
-        workspace.sections / "bond_issuance"
-    )
+    with pytest.raises(ValueError, match="owner mode directory"):
+        apply_workspace_defaults(
+            "parse",
+            {
+                "data_root": str(workspace.root),
+                "mode": "bond_issuance",
+                "input_directory": str(workspace.sections),
+            },
+        )
 
 
 def test_workspace_defaults_use_parent_html_for_derived_filter(tmp_path: Path) -> None:
@@ -1166,6 +1162,7 @@ def test_existing_filter_route_uses_workspace_stage_paths(
         return {
             "format": "kind_disclosure_filter_v1",
             "source_type": "sqlite_manifest",
+            "source_fingerprint": "0" * 64,
             "source_sqlite_manifest_path": str(
                 data_root / "02-table" / "sqlite_manifest.json"
             ),
