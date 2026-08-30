@@ -41,6 +41,18 @@ assets/quantiwise-xlsx/
 # Temp files
 tmp/
 
+# Generated/local artifacts
+/output/
+/generated_external_metadata_json/
+/samples/
+/_workspace/
+/reports/knowledge-documentation/
+/LISTED_AND_DELISTED(from000000to260428).xlsx
+/scripts/kind_external_metadata_examples.xlsx
+/docs/disclosures/07-html-parse/parsers/examples-2026-08-14.html
+/uncommitted_feature_extraction_table.json
+~$*
+
 # Skills
 .understand-anything/
 /.gemini
