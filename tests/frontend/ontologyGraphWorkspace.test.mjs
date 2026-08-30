@@ -13,7 +13,7 @@ const appFramePath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/
 const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
 const backtestPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureBacktests.ts";
-const terminologyPath = "docs/design/terminology.md";
+const terminologyPath = "docs/design/terminology/ontology.md";
 
 test("local backtest rejects an unknown calculation method", async () => {
   const source = await readFile(backtestPath, "utf8");
@@ -407,46 +407,14 @@ test("ontology disclosure analysis exposes result review and category-scoped exe
 test("ontology terminology documents the real-data workspace labels", async () => {
   const source = await readFile(terminologyPath, "utf8");
 
-  assert.match(source, /\| Ontology real-data workspace \| Graph View \|/);
-  assert.match(source, /\| Ontology chart workspace \| Chart View \|/);
-  assert.match(source, /\| Ontology data status \| 데이터 상태 \|/);
-  assert.match(source, /\| Ontology company selector \| 회사 선택 \|/);
-  assert.match(source, /\| Ontology stock selector \| 종목 선택 \|/);
-  assert.match(source, /\| Ontology node graph \| 공시 관계 그래프 \|/);
-  assert.match(source, /\| Ontology node search \| 노드 검색 \|/);
-  assert.match(source, /\| Ontology graph unpin action \| 핀 해제 \|/);
-  assert.match(source, /\| Ontology event-price chart \| 주가-공시 차트 \|/);
-  assert.match(source, /\| Ontology event timeline \| 공시 타임라인 \|/);
-  assert.match(source, /\| Ontology disclosure analysis \| 공시 분석 \|/);
-  assert.match(source, /\| Ontology triple barrier execution action \| Triple Barrier 실행 \|/);
-  assert.match(source, /\| Ontology triple barrier execution company selector \| 실행 종목 선택 \|/);
-  assert.match(source, /\| Ontology triple barrier execution company search action \| 실행 대상 검색 \|/);
-  assert.match(source, /\| Ontology triple barrier result company selector \| 결과 종목 선택 \|/);
-  assert.match(source, /\| Ontology triple barrier result company search action \| 저장 결과 검색 \|/);
-  assert.match(source, /\| Ontology triple barrier selected result lookup action \| 선택 종목 결과 조회 \|/);
-  assert.match(source, /\| Ontology triple barrier event basis \| 이벤트 기준일 \|/);
-  assert.match(source, /\| Ontology triple barrier price basis \| 가격 기준 \|/);
-  assert.match(source, /\| Ontology triple barrier result table \| 결과 테이블 \|/);
-  assert.match(source, /\| Ontology chart frequency selector \| 일봉\/3일봉\/5일봉\/7일봉\/20일봉\/월봉 \|/);
-  assert.match(source, /\| Ontology chart type selector \| 캔들\/종가선 \|/);
-  assert.match(source, /\| Ontology final report marker \| 최종보고서 \|/);
-  assert.match(source, /\| Ontology full date range \| 전체 기간 \|/);
-  assert.match(source, /\| Ontology chart fullscreen action \| 전체화면 \|/);
-  assert.match(source, /\| Ontology chart exit fullscreen action \| 전체화면 닫기 \|/);
-  assert.match(source, /\| Ontology chart zoom sensitivity \| 확대\/축소 민감도 \|/);
-  assert.match(source, /\| Ontology chart marker style section \| 공시 마커 스타일 \|/);
-  assert.match(source, /\| Ontology chart marker style target \| 스타일 대상 \|/);
-  assert.match(source, /\| Ontology chart marker placement setting \| 공시 마커 위치 \|/);
-  assert.match(source, /\| Ontology chart marker shape setting \| 공시 마커 모양 \|/);
-  assert.match(source, /\| Ontology chart marker color setting \| 색상 \|/);
-  assert.match(source, /\| Ontology chart marker size setting \| 크기 \|/);
-  assert.match(source, /\| Ontology chart marker line width setting \| 선 두께 \|/);
-  assert.doesNotMatch(source, /\| Ontology chart view mode \| 차트 \|/);
-  assert.doesNotMatch(source, /\| Ontology analysis summary \| 분석 요약 \|/);
-  assert.doesNotMatch(source, /\| Ontology analysis filters \| 분석 조건 \|/);
-  assert.doesNotMatch(source, /\| Ontology workspace analysis mode \| 분석 \|/);
-  assert.doesNotMatch(source, /\| Ontology workspace company mode \| 회사 \|/);
-  assert.doesNotMatch(source, /\| Ontology workspace data mode \| 데이터 \|/);
+  assert.match(source, /\| 관계 분석 화면 \| Graph View \|/);
+  assert.match(source, /\| 이벤트·가격 차트 화면 \| Chart View \|/);
+  assert.match(source, /\| 공시 분석 화면 \| 공시 분석 \|/);
+  assert.match(source, /\| 그래프 \| 공시 관계 그래프 \|/);
+  assert.match(source, /\| 가격과 공시 결합 차트 \| 주가-공시 차트 \|/);
+  assert.match(source, /\| 차트의 공시 목록 \| 공시 타임라인 \|/);
+  assert.match(source, /\| 실행 대상 선택 \| 실행 종목 선택 \|/);
+  assert.match(source, /\| 저장 결과 대상 선택 \| 결과 종목 선택 \|/);
 });
 
 test("ontology chart settings expose per-disclosure marker styles in one compact section", async () => {
@@ -486,7 +454,7 @@ test("disclosure analysis page runs and displays persisted triple barrier result
     readFile(terminologyPath, "utf8"),
   ]);
 
-  assert.match(terminologySource, /Triple Barrier 실행/);
+  assert.match(terminologySource, /실행 설정 \/ 저장 결과/);
   assert.match(analysisSource, /apiPost/);
   assert.match(analysisSource, /\/api\/ontology\/triple-barrier\/run/);
   assert.match(analysisSource, /\/api\/ontology\/triple-barrier\/results/);

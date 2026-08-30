@@ -4,7 +4,7 @@ import test from "node:test";
 
 const pagePath = "frontend/finiq_GUI/apps/market-desk/src/app/dart-link/page.tsx";
 const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
-const terminologyPath = "docs/design/terminology.md";
+const terminologyPath = "docs/design/terminology/index.md";
 
 test("removed KIND-DART workflow is not exposed in the frontend", async () => {
   const [navigation, terminology] = await Promise.all([
