@@ -328,6 +328,97 @@ def test_stage_one_asks_before_replacing_downloads_with_unusable_metadata(
     ]
 
 
+def test_stage_one_blocks_conflicting_download_outside_requested_range(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    current_folder = tmp_path / "01-list" / "20260101_20260712"
+    outside_folder = tmp_path / "01-list" / "20250101_20251231"
+    for folder in (current_folder, outside_folder):
+        folder.mkdir(parents=True)
+        (folder / "001_post_page_00001.body").write_text("saved", encoding="utf-8")
+    calls: list[str] = []
+
+    def check_existing(path: str, **_kwargs: object) -> dict[str, object]:
+        calls.append(path)
+        filters_match = Path(path) == current_folder
+        return {
+            "has_existing": True,
+            "ranges": [
+                {
+                    "status": "validated",
+                    "filters_match": filters_match,
+                    "local_count": 100,
+                    "kind_count": 100,
+                    "error_detail": (
+                        None if filters_match else "현재 검색 설정과 다릅니다."
+                    ),
+                }
+            ],
+        }
+
+    monkeypatch.setattr(automation, "check_existing_downloads", check_existing)
+    monkeypatch.setattr(
+        automation,
+        "run_download_action",
+        lambda *_args, **_kwargs: pytest.fail(
+            "요청 범위 밖 충돌을 남긴 채 다운로드하면 안 됩니다."
+        ),
+    )
+
+    with pytest.raises(ValueError, match="현재 요청 기간 밖"):
+        _run_stage_one(profile, **_callbacks())
+
+    assert set(calls) == {str(current_folder), str(outside_folder)}
+
+
+def test_stage_one_holds_kind_network_lock_for_check_and_download(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    folder = tmp_path / "01-list" / "20260101_20260712"
+    folder.mkdir(parents=True)
+    (folder / "001_post_page_00001.body").write_text("saved", encoding="utf-8")
+    events: list[str] = []
+
+    class TrackingLock:
+        held = False
+
+        def __enter__(self) -> None:
+            self.held = True
+            events.append("lock")
+
+        def __exit__(self, *_args: object) -> None:
+            self.held = False
+            events.append("unlock")
+
+    lock = TrackingLock()
+
+    def check_existing(*_args: object, **_kwargs: object) -> dict[str, object]:
+        assert lock.held is True
+        events.append("check")
+        return {
+            "has_existing": True,
+            "ranges": [{"status": "validated", "filters_match": True}],
+        }
+
+    def run_download(*_args: object, **_kwargs: object) -> dict[str, object]:
+        assert lock.held is True
+        events.append("download")
+        return {"mode": "yearly"}
+
+    monkeypatch.setattr(automation, "KIND_NETWORK_JOB_LOCK", lock)
+    monkeypatch.setattr(automation, "check_existing_downloads", check_existing)
+    monkeypatch.setattr(automation, "run_download_action", run_download)
+
+    result = _run_stage_one(profile, **_callbacks())
+
+    assert result["mode"] == "yearly"
+    assert events == ["lock", "check", "download", "unlock"]
+
+
 def test_stage_two_reads_official_stage_one_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

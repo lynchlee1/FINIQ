@@ -10,6 +10,9 @@ import pytest
 
 from finiq.data_scraper.core.client import SEARCH_RESULTS_FILENAME_TEMPLATE
 from finiq.market_desk.web.features.downloads import kind_runner
+from finiq.market_desk.web.features.downloads.kind_inspect import (
+    inspect_download_output_directory_payload,
+)
 
 
 def _result_page_html(
@@ -197,21 +200,111 @@ def test_auto_download_resumes_from_first_missing_staged_page(
     page_three = staging_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=3)
     page_two.unlink()
     page_three.write_bytes(_result_page_html(page_number=3))
+
+    _run_auto_download(output_directory)
+
+    assert fake_download.ranges == [(1, 1), (2, 3), (2, 3), (1, 1)]
+    assert len(list(output_directory.glob("*_post_page_*.body"))) == 3
+
+
+def test_auto_download_uses_saved_pages_missing_from_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_directory = tmp_path / "01-list"
+    fake_download = _FakeDownloadPages(fail_once_at_page=2)
+    _patch_download_pages(monkeypatch, fake_download)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        _run_auto_download(output_directory)
+
+    staging_directory = kind_runner._download_staging_directory(output_directory)
+    page_two = staging_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=2)
     checkpoint_path = staging_directory / "kind_workflow.checkpoint.json"
     checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
     checkpoint["saved_files"] = [
         name
         for name in checkpoint["saved_files"]
         if Path(name).name != page_two.name
-    ] + [page_three.name]
-    checkpoint["last_saved_page"] = 3
-    checkpoint["last_saved_file"] = page_three.name
+    ]
+    checkpoint["last_saved_page"] = 1
+    checkpoint["last_saved_file"] = SEARCH_RESULTS_FILENAME_TEMPLATE.format(
+        page_number=1
+    )
     checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
 
     _run_auto_download(output_directory)
 
-    assert fake_download.ranges == [(1, 1), (2, 3), (2, 3), (1, 1)]
+    assert fake_download.ranges == [(1, 1), (2, 3), (3, 3), (1, 1)]
     assert len(list(output_directory.glob("*_post_page_*.body"))) == 3
+
+
+def test_yearly_inspection_preserves_current_staging_for_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "01-list"
+    output_directory = output_root / "20250101_20251231"
+    fake_download = _FakeDownloadPages(fail_once_at_page=2)
+    _patch_download_pages(monkeypatch, fake_download)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        _run_auto_download(output_directory)
+
+    staging_directory = kind_runner._download_staging_directory(output_directory)
+    inspection = inspect_download_output_directory_payload(
+        {
+            "mode": "yearly",
+            "output_directory": str(output_root),
+            "start_date": "2025-01-01",
+            "end_date": "2025-12-31",
+            "page_size": 1,
+            "dry_run": True,
+        }
+    )
+
+    assert inspection["deletion_candidate_count"] == 0
+    assert staging_directory.is_dir()
+
+    _run_auto_download(output_directory)
+
+    assert fake_download.ranges == [(1, 1), (2, 3), (3, 3), (1, 1)]
+    assert not staging_directory.exists()
+
+
+def test_resume_orders_actual_pages_numerically_after_page_999(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staging_directory = tmp_path / "staging"
+    staging_directory.mkdir()
+    saved_files: list[str] = []
+    for page_number in range(1, 1001):
+        page_path = staging_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(
+            page_number=page_number
+        )
+        page_path.write_bytes(b"page")
+        saved_files.append(page_path.name)
+
+    def validate_page(path: Path, *, expected_page_size: int) -> dict[str, int]:
+        assert expected_page_size == 1
+        return {
+            "current_page": kind_runner.result_page_number(path),
+            "total_pages": 1000,
+            "total_items": 1000,
+        }
+
+    monkeypatch.setattr(kind_runner, "validate_downloaded_result_page", validate_page)
+
+    retained, downloaded_pages, total_pages = kind_runner._resume_staged_download_pages(
+        staging_directory,
+        {"saved_files": sorted(saved_files)},
+        page_size=1,
+    )
+
+    assert len(retained) == 1000
+    assert downloaded_pages == 1000
+    assert total_pages == 1000
 
 
 def test_auto_download_consistency_failure_preserves_previous_output(

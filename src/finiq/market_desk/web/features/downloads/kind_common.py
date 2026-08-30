@@ -63,6 +63,13 @@ _CANCELLED_DOWNLOAD_JOBS: set[str] = set()
 _DOWNLOAD_JOB_RETENTION_MINUTES = DEFAULT_JOB_RETENTION_MINUTES
 DOWNLOAD_DELETE_CONFIRMATION_TEXT = "확인했습니다."
 DOWNLOAD_PARALLEL_STRATEGIES = {"years", "pages"}
+_DOWNLOAD_STAGING_SUFFIX = ".kind-download-staging"
+_UI_SEARCH_FILTER_FIELDS = {
+    "marketType",
+    "securities",
+    "searchCorpName",
+    "submitOblgNm",
+}
 
 
 class DownloadCancelled(Exception):
@@ -114,6 +121,12 @@ def _split_yearly_ranges(start: date, end: date) -> list[tuple[date, date]]:
         ranges.append((cursor, min(year_end, end)))
         cursor = date(cursor.year + 1, 1, 1)
     return ranges
+
+
+def _download_staging_directory(output_directory: Path) -> Path:
+    return output_directory.with_name(
+        f".{output_directory.name}{_DOWNLOAD_STAGING_SUFFIX}"
+    )
 
 
 def _normalize_disclosure_type_groups(
@@ -415,7 +428,41 @@ def _folder_date_range_from_name(folder: Path) -> tuple[date, date] | None:
 def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
     try:
         validate_kind_workflow_input_snapshot(snapshot)
-        search_filters_dict = dict(snapshot.get("search_filters") or [])
+        raw_search_filters = snapshot.get("search_filters") or []
+        search_filter_items = (
+            list(raw_search_filters.items())
+            if isinstance(raw_search_filters, dict)
+            else list(raw_search_filters)
+        )
+        repeated_fields = sorted(
+            {
+                key
+                for key, _value in search_filter_items
+                if sum(item_key == key for item_key, _item_value in search_filter_items)
+                > 1
+            }
+        )
+        if repeated_fields:
+            raise ValueError(
+                "repeated saved search filters cannot be represented by the current UI: "
+                + ", ".join(repeated_fields)
+            )
+        unsupported_fields = sorted(
+            {
+                key
+                for key, value in search_filter_items
+                if value != "" and key not in _UI_SEARCH_FILTER_FIELDS
+            }
+        )
+        if unsupported_fields:
+            raise ValueError(
+                "unsupported saved search filters: " + ", ".join(unsupported_fields)
+            )
+        if snapshot.get("include_previous_disclosures") is not None:
+            raise ValueError(
+                "saved include_previous_disclosures cannot be represented by the current UI"
+            )
+        search_filters_dict = dict(search_filter_items)
 
         market_val = search_filters_dict.get("marketType", "")
         market_labels = [label for label, value in MARKET_TYPES.items() if value == market_val]
@@ -581,6 +628,10 @@ def _download_cleanup_targets(
         )
         for chunk_start, chunk_end in _split_yearly_ranges(start_date, end_date)
     ]
+    staging_paths = {
+        _download_staging_directory(folder).resolve()
+        for folder, _size in expected_targets
+    }
     targets_by_path = {str(folder): (folder, size) for folder, size in expected_targets}
     if output_directory.is_dir():
         for child in output_directory.iterdir():
@@ -590,6 +641,8 @@ def _download_cleanup_targets(
                         "KIND download output directory must not contain "
                         f"symbolic-link result folders: {child}"
                     )
+                continue
+            if child.resolve() in staging_paths:
                 continue
             if child.is_dir() and _result_body_files(child):
                 targets_by_path[str(child.resolve())] = (child.resolve(), page_size)

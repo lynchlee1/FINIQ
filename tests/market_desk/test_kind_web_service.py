@@ -15020,6 +15020,30 @@ def test_detect_existing_downloads_is_metadata_only(tmp_path: Path, monkeypatch)
     assert res["ranges"][0]["kind_count"] is None
 
 
+def test_detect_existing_downloads_rejects_saved_filter_missing_from_current_ui(
+    tmp_path: Path,
+) -> None:
+    from finiq.market_desk.web.features.downloads.kind_common import (
+        DownloadInputMetadataError,
+    )
+    from finiq.market_desk.web.features.downloads.kind_existing import (
+        detect_existing_downloads,
+    )
+
+    folder = tmp_path / "20260101_20260501"
+    folder.mkdir()
+    (folder / "001_post_page_00001.body").write_bytes(b"metadata-only")
+    snapshot = _trusted_download_input_snapshot()
+    snapshot["search_filters"] = [["reportNm", "사업보고서"]]
+    (folder / "kind_workflow.input.json").write_text(
+        json.dumps(snapshot, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DownloadInputMetadataError, match="reportNm"):
+        detect_existing_downloads(str(tmp_path))
+
+
 def test_detect_existing_downloads_reports_inconsistent_saved_filters(
     tmp_path: Path,
 ) -> None:

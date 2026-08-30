@@ -53,6 +53,7 @@ from finiq.market_desk.web.features.disclosures.table_export import (
 from finiq.market_desk.web.features.downloads.kind_api import run_download_action
 from finiq.market_desk.web.features.downloads.kind_common import (
     DownloadInputMetadataError,
+    _download_cleanup_targets,
     _download_input_snapshot_from_payload,
     _normalize_disclosure_type_groups,
     _require_current_download_input_snapshot,
@@ -918,8 +919,14 @@ def _inspect_stage_one_downloads(
 ) -> dict[str, Any]:
     payload = _detail_download_payload(profile)
     conflicts: list[dict[str, Any]] = []
+    unreplaceable_conflicts: list[dict[str, Any]] = []
     checked_ranges = 0
-    for _range_start, _range_end, folder in _expected_download_ranges(profile):
+    expected_folders = {
+        folder.resolve()
+        for _range_start, _range_end, folder in _expected_download_ranges(profile)
+    }
+    _base, inspection_targets = _download_cleanup_targets(payload)
+    for folder, _page_size in inspection_targets:
         if cancel_check():
             raise RuntimeError("Job cancelled")
         if not folder.is_dir() or not list(folder.glob("*_post_page_*.body")):
@@ -935,15 +942,16 @@ def _inspect_stage_one_downloads(
                 parallel_workers=profile["execution"]["local_workers"],
             )
         except DownloadInputMetadataError as error:
-            conflicts.append(
-                {
-                    "range": folder.name,
-                    "code": "saved_download_invalid",
-                    "saved_count": None,
-                    "kind_count": None,
-                    "reason": str(error),
-                }
-            )
+            conflict = {
+                "range": folder.name,
+                "code": "saved_download_invalid",
+                "saved_count": None,
+                "kind_count": None,
+                "reason": str(error),
+            }
+            conflicts.append(conflict)
+            if folder.resolve() not in expected_folders:
+                unreplaceable_conflicts.append(conflict)
             continue
         statuses = list(existing.get("ranges") or [])
         status = statuses[0] if len(statuses) == 1 else {}
@@ -951,26 +959,28 @@ def _inspect_stage_one_downloads(
             continue
         local_count = status.get("local_count")
         kind_count = status.get("kind_count")
-        conflicts.append(
-            {
-                "range": folder.name,
-                "code": (
-                    "kind_count_changed"
-                    if local_count is not None
-                    and kind_count is not None
-                    and local_count != kind_count
-                    else "saved_download_invalid"
-                ),
-                "saved_count": local_count,
-                "kind_count": kind_count,
-                "reason": str(
-                    status.get("error_detail")
-                    or "기존 다운로드를 현재 설정으로 재사용할 수 없습니다."
-                ),
-            }
-        )
+        conflict = {
+            "range": folder.name,
+            "code": (
+                "kind_count_changed"
+                if local_count is not None
+                and kind_count is not None
+                and local_count != kind_count
+                else "saved_download_invalid"
+            ),
+            "saved_count": local_count,
+            "kind_count": kind_count,
+            "reason": str(
+                status.get("error_detail")
+                or "기존 다운로드를 현재 설정으로 재사용할 수 없습니다."
+            ),
+        }
+        conflicts.append(conflict)
+        if folder.resolve() not in expected_folders:
+            unreplaceable_conflicts.append(conflict)
     return {
         "conflicts": conflicts,
+        "unreplaceable_conflicts": unreplaceable_conflicts,
         "confirmation": _download_conflict_token(profile, conflicts)
         if conflicts
         else "",
@@ -986,24 +996,34 @@ def _run_stage_one(
     cancel_check: CancelCheck,
 ) -> dict[str, Any]:
     del trigger
-    inspected = _inspect_stage_one_downloads(
-        profile,
-        progress_callback=progress_callback,
-        cancel_check=cancel_check,
-    )
-    conflicts = inspected["conflicts"]
-    confirmation = inspected["confirmation"]
-    if conflicts and profile.get("download_confirmation") != confirmation:
-        return {
-            "needs_download_confirmation": True,
-            "download_conflicts": conflicts,
-            "download_confirmation": confirmation,
-        }
-    result = run_download_action(
-        _detail_download_payload(profile),
-        progress_callback=progress_callback,
-        cancel_check=cancel_check,
-    )
+    with KIND_NETWORK_JOB_LOCK:
+        inspected = _inspect_stage_one_downloads(
+            profile,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        conflicts = inspected["conflicts"]
+        unreplaceable_conflicts = inspected["unreplaceable_conflicts"]
+        if unreplaceable_conflicts:
+            ranges = ", ".join(
+                str(conflict["range"]) for conflict in unreplaceable_conflicts
+            )
+            raise ValueError(
+                "현재 요청 기간 밖의 기존 다운로드를 현재 검색 설정으로 재사용할 수 "
+                f"없습니다: {ranges}. 기존 다운로드를 정리하거나 검색 설정을 맞추세요."
+            )
+        confirmation = inspected["confirmation"]
+        if conflicts and profile.get("download_confirmation") != confirmation:
+            return {
+                "needs_download_confirmation": True,
+                "download_conflicts": conflicts,
+                "download_confirmation": confirmation,
+            }
+        result = run_download_action(
+            _detail_download_payload(profile),
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
     return {**result, "checked_ranges": inspected["checked_ranges"]}
 
 

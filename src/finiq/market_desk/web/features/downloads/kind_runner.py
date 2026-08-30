@@ -32,15 +32,6 @@ from finiq.data_scraper.workflow import (
 from finiq.market_desk.web.features.downloads.kind_common import *
 
 
-_DOWNLOAD_STAGING_SUFFIX = ".kind-download-staging"
-
-
-def _download_staging_directory(output_directory: Path) -> Path:
-    return output_directory.with_name(
-        f".{output_directory.name}{_DOWNLOAD_STAGING_SUFFIX}"
-    )
-
-
 def _read_download_checkpoint(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -87,48 +78,24 @@ def _resume_staged_download_pages(
     page_size: int,
 ) -> tuple[list[Path], int, int]:
     page_paths = sorted_result_page_paths(staging_directory)
-    checkpoint_pages = sorted(
-        Path(name).name
-        for name in checkpoint_payload.get("saved_files") or []
-        if "_post_page_" in Path(name).name
+    page_numbers = [result_page_number(path) for path in page_paths]
+    if len(page_numbers) != len(set(page_numbers)):
+        raise ValueError("중단된 KIND 임시 다운로드에 중복 페이지가 있습니다.")
+    if not page_paths or page_numbers[0] != 1:
+        raise ValueError("중단된 KIND 임시 다운로드의 첫 페이지가 없습니다.")
+
+    first_page_info = validate_downloaded_result_page(
+        page_paths[0],
+        expected_page_size=page_size,
     )
-    actual_pages = [path.name for path in page_paths]
-    if checkpoint_pages != actual_pages:
+    total_pages = int(first_page_info["total_pages"])
+    total_items = int(first_page_info["total_items"])
+    if int(first_page_info["current_page"]) != 1:
         raise ValueError(
-            "중단된 KIND 임시 다운로드의 checkpoint와 저장 페이지가 다릅니다."
+            "중단된 KIND 임시 다운로드의 파일명 페이지와 본문 페이지가 다릅니다: "
+            f"{page_paths[0].name}"
         )
-
-    total_pages_values: set[int] = set()
-    total_items_values: set[int] = set()
-    saved_page_numbers: set[int] = set()
-    for page_path in page_paths:
-        page_info = validate_downloaded_result_page(
-            page_path,
-            expected_page_size=page_size,
-        )
-        filename_page = result_page_number(page_path)
-        current_page = int(page_info["current_page"])
-        if current_page != filename_page:
-            raise ValueError(
-                "중단된 KIND 임시 다운로드의 파일명 페이지와 본문 페이지가 다릅니다: "
-                f"{page_path.name}"
-            )
-        if current_page in saved_page_numbers:
-            raise ValueError(
-                f"중단된 KIND 임시 다운로드에 중복 페이지 {current_page}가 있습니다."
-            )
-        saved_page_numbers.add(current_page)
-        total_pages_values.add(int(page_info["total_pages"]))
-        total_items_values.add(int(page_info["total_items"]))
-
-    if len(total_pages_values) != 1 or len(total_items_values) != 1:
-        raise ValueError(
-            "중단된 KIND 임시 다운로드 페이지들의 전체 페이지 수 또는 전체 건수가 다릅니다."
-        )
-    total_pages = next(iter(total_pages_values))
-    if any(page_number > total_pages for page_number in saved_page_numbers):
-        raise ValueError("중단된 KIND 임시 다운로드에 전체 페이지 범위를 넘는 페이지가 있습니다.")
-
+    saved_page_numbers = set(page_numbers)
     first_missing_page = next(
         (
             page_number
@@ -140,7 +107,27 @@ def _resume_staged_download_pages(
     for page_path in page_paths:
         if result_page_number(page_path) >= first_missing_page:
             page_path.unlink()
+
     retained_paths = sorted_result_page_paths(staging_directory)
+    for page_path in retained_paths:
+        page_info = validate_downloaded_result_page(
+            page_path,
+            expected_page_size=page_size,
+        )
+        filename_page = result_page_number(page_path)
+        current_page = int(page_info["current_page"])
+        if current_page != filename_page:
+            raise ValueError(
+                "중단된 KIND 임시 다운로드의 파일명 페이지와 본문 페이지가 다릅니다: "
+                f"{page_path.name}"
+            )
+        if (
+            int(page_info["total_pages"]) != total_pages
+            or int(page_info["total_items"]) != total_items
+        ):
+            raise ValueError(
+                "중단된 KIND 임시 다운로드 페이지들의 전체 페이지 수 또는 전체 건수가 다릅니다."
+            )
     downloaded_pages = first_missing_page - 1
     return retained_paths, downloaded_pages, total_pages
 
