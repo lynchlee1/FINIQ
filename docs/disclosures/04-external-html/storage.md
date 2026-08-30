@@ -14,7 +14,7 @@
 
 ## `<data_root>/04-external-html-download/<mode>/kind_disclosure_html_manifest.json`
 
-- [공통 HTML manifest 계약](../common/execution.md#html-manifest)을 따른다.
+- [공통 HTML manifest 계약](../common/html-reuse.md#html-manifest)을 따른다.
 
 ## `<data_root>/04-external-html-compress/<mode>/compressed-external-html.json`
 

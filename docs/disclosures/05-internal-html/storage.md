@@ -14,5 +14,5 @@
 
 ## `<data_root>/05-internal-html-download/<mode>/kind_disclosure_html_manifest.json`
 
-- [공통 HTML manifest 계약](../common/execution.md#html-manifest)을 따른다.
+- [공통 HTML manifest 계약](../common/html-reuse.md#html-manifest)을 따른다.
 - 파생 필터 작업은 상위 manifest와 HTML 중 자식 `filtered.json`의 `acpt_no` 부분집합만 검증해 사용하며 `selected_main_doc_no`도 상위 04단계 record와 일치해야 한다.

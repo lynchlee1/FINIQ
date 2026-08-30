@@ -36,7 +36,10 @@ nav:
           - 개요: disclosures/common/index.md
           - 작업공간: disclosures/common/workspace.md
           - 식별자: disclosures/common/identifiers.md
-          - 실행과 HTML 재사용: disclosures/common/execution.md
+          - 단계 결과 게시: disclosures/common/publication.md
+          - 공시 자동화: disclosures/common/automation.md
+          - KIND 다운로드 경로: disclosures/common/network.md
+          - HTML 재사용: disclosures/common/html-reuse.md
           - 예외와 복구: disclosures/common/recovery.md
           - 화면과 서비스: disclosures/common/interface.md
       - 01 공시내역 다운로드:
@@ -73,14 +76,33 @@ nav:
       - 07 공시원문 변환:
           - 단계 개요: disclosures/07-html-parse/index.md
           - 변환 실행: disclosures/07-html-parse/workflow.md
+          - 조회와 검사: disclosures/07-html-parse/inspection.md
           - 요청과 행 변환: disclosures/07-html-parse/request.md
           - 저장 형식: disclosures/07-html-parse/storage.md
           - 진단과 조회: disclosures/07-html-parse/diagnostics.md
           - 자산 거래: disclosures/07-html-parse/parsers/asset-transaction.md
-          - 채권 발행: disclosures/07-html-parse/parsers/bond-issuance.md
-          - 유상·무상증자: disclosures/07-html-parse/parsers/rights-issuance.md
+          - 채권 발행:
+              - 개요: disclosures/07-html-parse/parsers/bond-issuance/index.md
+              - 입력과 표 선택: disclosures/07-html-parse/parsers/bond-issuance/input.md
+              - 필드 추출: disclosures/07-html-parse/parsers/bond-issuance/fields.md
+              - 검증: disclosures/07-html-parse/parsers/bond-issuance/validation.md
+              - 저장 형식: disclosures/07-html-parse/parsers/bond-issuance/storage.md
+          - 유상·무상증자:
+              - 개요: disclosures/07-html-parse/parsers/rights-issuance/index.md
+              - 입력과 표 선택: disclosures/07-html-parse/parsers/rights-issuance/input.md
+              - 공통 필드 추출: disclosures/07-html-parse/parsers/rights-issuance/fields.md
+              - 공통 검증: disclosures/07-html-parse/parsers/rights-issuance/validation.md
+              - 저장 형식: disclosures/07-html-parse/parsers/rights-issuance/storage.md
+              - 무상증자: disclosures/07-html-parse/parsers/rights-issuance/bonus.md
+              - 유상증자: disclosures/07-html-parse/parsers/rights-issuance/paid.md
+              - 유상·무상증자: disclosures/07-html-parse/parsers/rights-issuance/mixed.md
           - 증권 거래: disclosures/07-html-parse/parsers/security-transaction.md
-          - 주주총회: disclosures/07-html-parse/parsers/shareholder-meeting.md
+          - 주주총회:
+              - 개요: disclosures/07-html-parse/parsers/shareholder-meeting/index.md
+              - 추출과 필드: disclosures/07-html-parse/parsers/shareholder-meeting/extraction.md
+              - 관계: disclosures/07-html-parse/parsers/shareholder-meeting/relationships.md
+              - 구현 원칙: disclosures/07-html-parse/parsers/shareholder-meeting/implementation.md
+              - 검증과 근거: disclosures/07-html-parse/parsers/shareholder-meeting/validation.md
       - 08 공시 정정내역 한눈에:
           - 단계 개요: disclosures/08-change-log/index.md
           - 정정내역 비교: disclosures/08-change-log/comparison.md
