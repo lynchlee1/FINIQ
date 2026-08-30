@@ -52,6 +52,7 @@ from finiq.market_desk.web.features.disclosures.table_export import (
 )
 from finiq.market_desk.web.features.downloads.kind_api import run_download_action
 from finiq.market_desk.web.features.downloads.kind_common import (
+    DownloadInputMetadataError,
     _download_input_snapshot_from_payload,
     _require_current_download_input_snapshot,
     _split_yearly_ranges,
@@ -893,15 +894,27 @@ def _inspect_stage_one_downloads(
             raise RuntimeError("Job cancelled")
         if not folder.is_dir() or not list(folder.glob("*_post_page_*.body")):
             continue
-        existing = check_existing_downloads(
-            str(folder),
-            verify_with_kind=True,
-            current_payload=payload,
-            cancel_check=cancel_check,
-            progress_callback=progress_callback,
-            parallel_workers=profile["execution"]["local_workers"],
-        )
         checked_ranges += 1
+        try:
+            existing = check_existing_downloads(
+                str(folder),
+                verify_with_kind=True,
+                current_payload=payload,
+                cancel_check=cancel_check,
+                progress_callback=progress_callback,
+                parallel_workers=profile["execution"]["local_workers"],
+            )
+        except DownloadInputMetadataError as error:
+            conflicts.append(
+                {
+                    "range": folder.name,
+                    "code": "saved_download_invalid",
+                    "saved_count": None,
+                    "kind_count": None,
+                    "reason": str(error),
+                }
+            )
+            continue
         statuses = list(existing.get("ranges") or [])
         status = statuses[0] if len(statuses) == 1 else {}
         if status.get("status") == "validated" and status.get("filters_match", True):

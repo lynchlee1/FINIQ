@@ -224,6 +224,45 @@ def test_stage_one_uses_regular_existing_check_before_confirmation(
     assert completed["mode"] == "yearly"
 
 
+def test_stage_one_asks_before_replacing_downloads_with_unusable_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    folder = tmp_path / "01-list" / "20260101_20260712"
+    folder.mkdir(parents=True)
+    (folder / "001_post_page_00001.body").write_text("saved", encoding="utf-8")
+
+    def fail_existing_check(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise automation.DownloadInputMetadataError(
+            "저장 조건을 읽을 수 없습니다."
+        )
+
+    monkeypatch.setattr(
+        automation,
+        "check_existing_downloads",
+        fail_existing_check,
+    )
+    monkeypatch.setattr(
+        automation,
+        "run_download_action",
+        lambda *_args, **_kwargs: pytest.fail("확인 전 다운로드하면 안 됩니다."),
+    )
+
+    pending = _run_stage_one(profile, **_callbacks())
+
+    assert pending["needs_download_confirmation"] is True
+    assert pending["download_conflicts"] == [
+        {
+            "range": folder.name,
+            "code": "saved_download_invalid",
+            "saved_count": None,
+            "kind_count": None,
+            "reason": "저장 조건을 읽을 수 없습니다.",
+        }
+    ]
+
+
 def test_stage_two_reads_official_stage_one_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
