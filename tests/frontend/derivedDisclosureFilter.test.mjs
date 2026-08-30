@@ -114,16 +114,18 @@ test("automation keeps derived filters out until its profile stores parent ident
 
 test("derived disclosure filter documentation fixes ownership and depth", async () => {
   const paths = [
-    "docs/disclosures/03-filter.md",
-    "docs/disclosures/04-external-html.md",
-    "docs/disclosures/05-internal-html.md",
+    "docs/disclosures/03-filter/storage.md",
+    "docs/disclosures/03-filter/execution.md",
+    "docs/disclosures/04-external-html/download.md",
+    "docs/disclosures/04-external-html/storage.md",
+    "docs/disclosures/05-internal-html/download.md",
   ];
   const docs = (await Promise.all(paths.map((path) => readFile(path, "utf8")))).join("\n");
 
   assert.match(docs, /03-filter\/<parent_mode>\/subfilters\/<mode>/);
   assert.match(docs, /한 단계/);
   assert.match(docs, /parent_result_fingerprint/);
-  assert.match(docs, /상위 기본 필터가 소유한 외부 HTML/);
-  assert.match(docs, /상위 기본 필터가 소유한 내부 HTML/);
-  assert.match(docs, /fallback은 사용하지 않는다/);
+  assert.match(docs, /상위 기본 필터의 외부 HTML/);
+  assert.match(docs, /상위 기본 필터의 내부 HTML/);
+  assert.match(docs, /상위 결과 오류를 02단계 전체 검색이나 다른 필터 결과로 보완하지 않는다/);
 });

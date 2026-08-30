@@ -22,10 +22,10 @@
 
 아래 절차는 계산 낭비처럼 보여도 정확성과 재사용 가능 여부를 보장하기 위해 문서에 명시되어 있으므로 변경하지 않았다.
 
-- 03: 필터 실행 전 실제 SQLite 건수를 검증한다. ([단계 문서](docs/disclosures/03-filter.md))
-- 04: 압축 JSON을 저장한 뒤 다시 읽어 파일 구조와 `records`를 검증한다. ([단계 문서](docs/disclosures/04-external-html.md))
-- 05: 저장한 HTML을 다시 판별한다. ([단계 문서](docs/disclosures/05-internal-html.md))
-- 06: 하나라도 저장 규칙을 만족하지 않으면 쓰기를 시작하지 않도록 전체 입력을 먼저 확인한다. ([단계 문서](docs/disclosures/06-section-split.md))
+- 03: 필터 실행 전 실제 SQLite 건수를 검증한다. ([필터 구성](docs/disclosures/03-filter/filtering.md))
+- 04: 압축 JSON을 저장한 뒤 다시 읽어 파일 구조와 `records`를 검증한다. ([압축](docs/disclosures/04-external-html/compression.md))
+- 05: 저장한 HTML을 다시 판별한다. ([내부 HTML 저장](docs/disclosures/05-internal-html/download.md))
+- 06: 하나라도 저장 규칙을 만족하지 않으면 쓰기를 시작하지 않도록 전체 입력을 먼저 확인한다. ([처리 흐름](docs/disclosures/06-section-split/workflow.md))
 - 07: `skip_errors=true`일 때 `progress_interval`마다 현재 전체 결과를 중간 저장한다. ([단계 문서](docs/disclosures/07-html-parse/index.md), [설정 기준](docs/disclosures/07-html-parse/reference.md))
 
 ## 앞으로 구현할 내용
@@ -44,4 +44,4 @@
 - 프런트 정적 테스트 160건과 전체 production build: 통과
 - 변경 Python 파일 `py_compile` 및 `git diff --check`: 통과
 
-세부 기능 계약은 `docs/disclosures/01-download.md`부터 `docs/disclosures/07-html-parse`까지의 단계별 문서를 기준으로 한다.
+세부 기능 계약은 `docs/disclosures/01-download`부터 `docs/disclosures/07-html-parse`까지의 단계별 문서를 기준으로 한다.

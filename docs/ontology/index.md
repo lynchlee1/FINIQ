@@ -4,7 +4,7 @@ Ontology 문서는 공시 결과와 가격 자료를 분석하고 시각화하�
 
 | 영역 | 문서 |
 | --- | --- |
-| 공통 작업공간, 병렬 처리, 회사 검색 | [공통 계약](common.md) |
+| 공통 작업공간, 병렬 처리, 회사 검색 | [공통 계약](common/index.md) |
 | Excel·Parquet 변환과 시장 이력 | [Quantiwise](quantiwise.md) |
 | 관계 그래프 조회·편집·내보내기 | [Graph View](graph-view.md) |
 | 가격 차트 구성 | [Chart View](chart-view.md) |

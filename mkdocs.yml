@@ -32,13 +32,40 @@ nav:
   - 아키텍처: architecture.md
   - 공시 파이프라인:
       - 전체 흐름: disclosures/index.md
-      - 공통 계약: disclosures/common.md
-      - 01 공시내역 다운로드: disclosures/01-download.md
+      - 공통 계약:
+          - 개요: disclosures/common/index.md
+          - 작업공간: disclosures/common/workspace.md
+          - 식별자: disclosures/common/identifiers.md
+          - 실행과 HTML 재사용: disclosures/common/execution.md
+          - 예외와 복구: disclosures/common/recovery.md
+          - 화면과 서비스: disclosures/common/interface.md
+      - 01 공시내역 다운로드:
+          - 단계 개요: disclosures/01-download/index.md
+          - 다운로드 실행: disclosures/01-download/download.md
+          - 기존 데이터 검사: disclosures/01-download/inspection.md
+          - 저장 형식: disclosures/01-download/storage.md
       - 02 공시내역 변환: disclosures/02-table.md
-      - 03 공시내역 필터링: disclosures/03-filter.md
-      - 04 공시원문 외부 저장: disclosures/04-external-html.md
-      - 05 공시원문 내부 저장: disclosures/05-internal-html.md
-      - 06 공시원문 목차 분리: disclosures/06-section-split.md
+      - 03 공시내역 필터링:
+          - 단계 개요: disclosures/03-filter/index.md
+          - 필터 구성: disclosures/03-filter/filtering.md
+          - 실행과 결과 관리: disclosures/03-filter/execution.md
+          - 저장 형식: disclosures/03-filter/storage.md
+      - 04 공시원문 외부 저장:
+          - 단계 개요: disclosures/04-external-html/index.md
+          - 외부 HTML 저장: disclosures/04-external-html/download.md
+          - 기존 데이터 검사: disclosures/04-external-html/inspection.md
+          - 압축: disclosures/04-external-html/compression.md
+          - 저장 형식: disclosures/04-external-html/storage.md
+      - 05 공시원문 내부 저장:
+          - 단계 개요: disclosures/05-internal-html/index.md
+          - 내부 HTML 저장: disclosures/05-internal-html/download.md
+          - 저장 형식: disclosures/05-internal-html/storage.md
+          - 네트워크 경로: disclosures/05-internal-html/proxy.md
+      - 06 공시원문 목차 분리:
+          - 단계 개요: disclosures/06-section-split/index.md
+          - 분리 경계: disclosures/06-section-split/boundaries.md
+          - 처리 흐름: disclosures/06-section-split/workflow.md
+          - 저장 형식: disclosures/06-section-split/storage.md
       - 07 공시원문 변환:
           - 단계 계약: disclosures/07-html-parse/index.md
           - 요청·저장 형식: disclosures/07-html-parse/reference.md
@@ -48,18 +75,29 @@ nav:
           - 증권 거래: disclosures/07-html-parse/parsers/security-transaction.md
           - 주주총회: disclosures/07-html-parse/parsers/shareholder-meeting.md
       - 08 공시 정정내역 한눈에: disclosures/08-change-log.md
-      - 09 공시 관계 그래프: disclosures/09-disclosure-graph.md
+      - 09 공시 관계 그래프:
+          - 단계 개요: disclosures/09-disclosure-graph/index.md
+          - 그래프 구성: disclosures/09-disclosure-graph/graph.md
+          - 주주총회 관계: disclosures/09-disclosure-graph/shareholder-meeting.md
+          - 저장 형식: disclosures/09-disclosure-graph/storage.md
   - Ontology:
       - 개요: ontology/index.md
-      - 공통 계약: ontology/common.md
+      - 공통 계약:
+          - 개요: ontology/common/index.md
+          - 복구: ontology/common/recovery.md
+          - 검증과 중단: ontology/common/validation.md
+          - 실행 환경: ontology/common/runtime.md
       - Quantiwise: ontology/quantiwise.md
       - Graph View: ontology/graph-view.md
       - Chart View: ontology/chart-view.md
       - 공시 분석: ontology/disclosure-analysis.md
   - 디자인:
       - 디자인 시스템: design/index.md
-      - 컴포넌트 계약: design/components/index.md
-      - 기존 데이터 검토: design/components/inspection-block.md
+      - 시각 기반: design/foundations.md
+      - UI 용어: design/terminology.md
+      - 컴포넌트:
+          - 공통 계약: design/components/index.md
+          - 기존 데이터 검토: design/components/inspection-block.md
   - 운영 안내: operations.md
   - 개발 안내: development.md
   - ADR:

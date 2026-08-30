@@ -13,7 +13,7 @@ const appFramePath = "frontend/finiq_GUI/apps/market-desk/src/components/layout/
 const webAppFramePath = "frontend/finiq_GUI/packages/web-app/src/components/layout/AppFrame.tsx";
 const navigationPath = "frontend/finiq_GUI/apps/market-desk/src/config/navigation.ts";
 const backtestPath = "frontend/finiq_GUI/apps/market-desk/src/lib/disclosureBacktests.ts";
-const terminologyPath = "docs/design/index.md";
+const terminologyPath = "docs/design/terminology.md";
 
 test("local backtest rejects an unknown calculation method", async () => {
   const source = await readFile(backtestPath, "utf8");

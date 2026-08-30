@@ -16,7 +16,7 @@
 4. 로그의 첫 원인과 마지막 게시 상태를 구분한다.
 5. 정상 결과가 보존됐는지 확인한 뒤 재실행 범위를 정한다.
 
-단계별 세부 조건은 [공시 파이프라인](disclosures/index.md), 공통 저장·복구 규칙은 [공시 처리 공통 계약](disclosures/common.md)을 따른다.
+단계별 세부 조건은 [공시 파이프라인](disclosures/index.md), 공통 저장·복구 규칙은 [공시 처리 공통 계약](disclosures/common/index.md)을 따른다.
 
 ## 재처리 범위
 

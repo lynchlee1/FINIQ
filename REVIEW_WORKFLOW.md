@@ -37,7 +37,7 @@ Keep fixes surgical. Do not reimplement intentional or ambiguous behavior, and d
 Prefer evidence in this order:
 
 1. Explicit requirements and feature contracts
-2. `docs/design/index.md` terminology and UI contracts
+2. `docs/design/terminology.md` terminology and UI contracts
 3. API, schema, type, and persistence invariants
 4. Reproducible runtime behavior
 5. Regression tests
