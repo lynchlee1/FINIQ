@@ -27,13 +27,9 @@ from finiq.market_desk.web.features.disclosures.external_html_download import (
     download_disclosure_external_html_payload,
 )
 from finiq.market_desk.web.features.disclosures.filter_presets import (
-    begin_filter_workflow_payload,
-    complete_filter_workflow_payload,
-    fail_filter_workflow_payload,
     filter_workflow_path,
-    interrupt_filter_workflow_payload,
     load_filter_workflow_result_payload,
-    mark_filter_workflow_query_completed,
+    run_filter_workflow_payload,
 )
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
     check_disclosure_html_output_directory_payload,
@@ -69,7 +65,6 @@ from finiq.market_desk.web.features.downloads.kind_existing import (
 from finiq.market_desk.web.features.market_data.service_payloads import (
     filter_disclosures_payload,
 )
-from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
 
 from .layout import (
     DisclosureWorkspace,
@@ -1009,49 +1004,12 @@ def _run_stage(
             "filter_workers": execution["local_workers"],
             "progress_interval": execution["progress_interval"],
         }
-        workflow_run = begin_filter_workflow_payload(filter_body)
-        filter_body["source_offset"] = workflow_run["source_offset"]
-        filter_body["source_expected_count"] = workflow_run["source_expected_count"]
-        filter_body["source_expected_fingerprint"] = workflow_run[
-            "source_expected_fingerprint"
-        ]
-        try:
-            incremental_result = filter_disclosures_payload(
-                filter_body,
-                progress_callback=progress_callback,
-                cancel_check=cancel_check,
-            )
-            mark_filter_workflow_query_completed(
-                data_root=root,
-                mode=mode,
-                run_id=workflow_run["run_id"],
-                summary=incremental_result.get("summary"),
-            )
-            completed = complete_filter_workflow_payload(
-                data_root=root,
-                mode=mode,
-                run_id=workflow_run["run_id"],
-                result=incremental_result,
-            )
-            result = completed["result"]
-            atomic_write_json(workspace.filtered / mode / "filtered.json", result)
-            return result
-        except FilterCancelled as error:
-            interrupt_filter_workflow_payload(
-                data_root=root,
-                mode=mode,
-                run_id=workflow_run["run_id"],
-                partial_result=error.partial_payload,
-            )
-            raise
-        except Exception as error:
-            fail_filter_workflow_payload(
-                data_root=root,
-                mode=mode,
-                run_id=workflow_run["run_id"],
-                error=error,
-            )
-            raise
+        return run_filter_workflow_payload(
+            filter_body,
+            filter_payload_builder=filter_disclosures_payload,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
     if stage == 4:
         download_result = download_disclosure_external_html_payload(
             {

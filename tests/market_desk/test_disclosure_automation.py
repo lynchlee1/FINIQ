@@ -243,48 +243,36 @@ def test_stage_two_reads_official_stage_one_root(
     assert captured["output_path"] == str(tmp_path / "02-table")
 
 
-def test_stage_three_passes_source_fingerprint_to_regular_filter_service(
+def test_stage_three_uses_regular_filter_workflow_service(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
     captured: dict[str, object] = {}
-    fingerprint = "a" * 64
     result = {
         "format": "kind_disclosure_filter_v1",
-        "source_fingerprint": fingerprint,
         "summary": {},
         "disclosures": [],
     }
 
-    monkeypatch.setattr(
-        automation,
-        "begin_filter_workflow_payload",
-        lambda _body: {
-            "run_id": "run",
-            "source_offset": 3,
-            "source_expected_count": 5,
-            "source_expected_fingerprint": fingerprint,
-        },
-    )
-
-    def filter_payload(body: dict[str, object], **_kwargs: object) -> dict[str, object]:
+    def run_filter_workflow(
+        body: dict[str, object], **_kwargs: object
+    ) -> dict[str, object]:
         captured.update(body)
         return result
 
-    monkeypatch.setattr(automation, "filter_disclosures_payload", filter_payload)
-    monkeypatch.setattr(automation, "mark_filter_workflow_query_completed", lambda **_kwargs: None)
     monkeypatch.setattr(
         automation,
-        "complete_filter_workflow_payload",
-        lambda **_kwargs: {"result": result},
+        "run_filter_workflow_payload",
+        run_filter_workflow,
     )
 
-    _run_stage(3, profile, **_callbacks())
+    returned = _run_stage(3, profile, **_callbacks())
 
-    assert captured["source_offset"] == 3
-    assert captured["source_expected_count"] == 5
-    assert captured["source_expected_fingerprint"] == fingerprint
+    assert returned is result
+    assert captured["data_root"] == str(tmp_path)
+    assert captured["mode"] == "bond_issuance"
+    assert captured["filter_blocks"] == []
 
 
 def test_stage_four_uses_official_mode_directories(
