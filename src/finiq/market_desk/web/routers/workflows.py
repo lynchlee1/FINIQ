@@ -22,12 +22,9 @@ from finiq.market_desk.web.features.disclosures.html_cleanup import (
     write_disclosure_html_manifest_payload,
 )
 from finiq.market_desk.web.features.disclosures.filter_presets import (
-    begin_filter_workflow_payload,
-    complete_filter_workflow_payload,
-    fail_filter_workflow_payload,
-    interrupt_filter_workflow_payload,
+    execute_filter_workflow_payload,
     manage_filter_presets_payload,
-    mark_filter_workflow_query_completed,
+    prepare_filter_workflow_execution,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
     cancel_disclosure_html_download,
@@ -76,129 +73,15 @@ from finiq.market_desk.web.features.disclosure_workflow.automation import (
 )
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     apply_workspace_defaults,
-    atomic_write_json,
     manage_disclosure_stage_links_payload,
     prepare_disclosure_workspace_payload,
     validate_workspace_mode,
 )
-from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
 
 FilterDisclosuresPayload = Callable[..., dict[str, Any]]
 SearchDisclosureTitlesPayload = Callable[..., dict[str, Any]]
 RunJobWorker = Callable[[str, str, dict[str, Any]], None]
 FILTER_STREAM_HEARTBEAT_SECONDS = 10.0
-
-
-def _filter_output_directory(value: object) -> str:
-    output_text = str(value or "").strip()
-    if not output_text:
-        raise ValueError("filter output directory is required")
-    output_root = Path(output_text).expanduser().resolve()
-    if output_root.suffix.lower() == ".json" or (
-        output_root.exists() and not output_root.is_dir()
-    ):
-        raise ValueError("filter output path must be a directory")
-    return str(output_root)
-
-
-def _write_transfer_file(
-    payload: dict[str, Any], *, output_directory: str, mode: object,
-    parent_mode: object = None,
-) -> dict[str, Any]:
-    normalized_mode = validate_workspace_mode(mode)
-    output_root = Path(_filter_output_directory(output_directory))
-    if parent_mode is not None and str(parent_mode).strip():
-        normalized_parent = validate_workspace_mode(parent_mode)
-        if normalized_parent == normalized_mode:
-            raise ValueError("parent_mode must be different from mode")
-        transfer_path = (
-            output_root
-            / normalized_parent
-            / "subfilters"
-            / normalized_mode
-            / "filtered.json"
-        )
-    else:
-        transfer_path = output_root / normalized_mode / "filtered.json"
-
-    payload["mode"] = normalized_mode
-    acpt_numbers = payload.get("external_html_download_acpt_numbers")
-    if not isinstance(acpt_numbers, list):
-        raise ValueError(
-            "external_html_download_acpt_numbers must be a list"
-        )
-    atomic_write_json(transfer_path, payload)
-    return {
-        "format": payload.get("format", ""),
-        "path": str(transfer_path),
-        "acpt_numbers": len(acpt_numbers),
-    }
-
-
-def _attach_external_html_download_transfer(
-    payload: dict[str, Any], *, output_directory: str, mode: object,
-    parent_mode: object = None,
-) -> dict[str, Any]:
-    if payload.get("format") == "kind_disclosure_filter_v1":
-        payload["external_html_download_transfer"] = _write_transfer_file(
-            payload,
-            output_directory=output_directory,
-            mode=mode,
-            parent_mode=parent_mode,
-        )
-    return payload
-
-
-def _finish_filter_workflow(
-    payload: dict[str, Any], *, body: dict[str, Any], workflow_run: dict[str, Any]
-) -> dict[str, Any]:
-    mark_filter_workflow_query_completed(
-        data_root=body.get("data_root"),
-        mode=workflow_run["mode"],
-        run_id=workflow_run["run_id"],
-        summary=payload.get("summary"),
-        parent_mode=workflow_run.get("parent_mode"),
-    )
-    completed_workflow = complete_filter_workflow_payload(
-        data_root=body.get("data_root"),
-        mode=workflow_run["mode"],
-        run_id=workflow_run["run_id"],
-        result=payload,
-        parent_mode=workflow_run.get("parent_mode"),
-    )
-    merged_result = completed_workflow.pop("result")
-    _attach_external_html_download_transfer(
-        merged_result,
-        output_directory=str(body.get("external_html_transfer_path") or "").strip(),
-        mode=body.get("mode"),
-        parent_mode=body.get("parent_mode"),
-    )
-    transfer = merged_result.get("external_html_download_transfer")
-    if not isinstance(transfer, dict):
-        raise ValueError("filter workflow did not record a result file")
-    merged_result["filter_workflow"] = completed_workflow
-    return merged_result
-
-
-def _fail_filter_workflow(
-    *, body: dict[str, Any], workflow_run: dict[str, Any], error: Exception
-) -> None:
-    if isinstance(error, FilterCancelled):
-        interrupt_filter_workflow_payload(
-            data_root=body.get("data_root"),
-            mode=workflow_run["mode"],
-            run_id=workflow_run["run_id"],
-            partial_result=error.partial_payload,
-            parent_mode=workflow_run.get("parent_mode"),
-        )
-        return
-    fail_filter_workflow_payload(
-        data_root=body.get("data_root"),
-        mode=workflow_run["mode"],
-        run_id=workflow_run["run_id"],
-        error=error,
-        parent_mode=workflow_run.get("parent_mode"),
-    )
 
 
 def _load_filter_preset_file(source_json_path: str) -> dict[str, Any]:
@@ -322,23 +205,9 @@ def create_workflows_router(
     @router.post("/api/disclosures/filter")
     async def filter_disclosures(request: Request):
         try:
-            body = apply_workspace_defaults("filter", await request.json())
-            body["mode"] = validate_workspace_mode(body.get("mode"))
-            body["include_external_html_download_acpt_numbers"] = True
-            body["external_html_transfer_path"] = _filter_output_directory(
-                body.get("external_html_transfer_path")
+            body, workflow_run = prepare_filter_workflow_execution(
+                await request.json()
             )
-            workflow_run = begin_filter_workflow_payload(body)
-            if "parent_acpt_numbers" in workflow_run:
-                body["acpt_numbers"] = workflow_run["parent_acpt_numbers"]
-                body["restrict_acpt_numbers"] = True
-            body["source_offset"] = workflow_run["source_offset"]
-            body["source_expected_count"] = workflow_run[
-                "source_expected_count"
-            ]
-            body["source_expected_fingerprint"] = workflow_run[
-                "source_expected_fingerprint"
-            ]
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         accept = request.headers.get("Accept", "")
@@ -353,25 +222,17 @@ def create_workflows_router(
 
                 def run_filter() -> None:
                     try:
-                        payload = filter_disclosures_payload(
+                        payload = execute_filter_workflow_payload(
                             body,
+                            workflow_run,
+                            filter_payload_builder=filter_disclosures_payload,
                             progress_callback=lambda progress: events.put(
                                 {"type": "progress", "progress": progress}
                             ),
                             cancel_check=cancel_event.is_set,
                         )
-                        payload = _finish_filter_workflow(
-                            payload,
-                            body=body,
-                            workflow_run=workflow_run,
-                        )
                         events.put({"type": "result", "payload": payload})
                     except Exception as e:
-                        _fail_filter_workflow(
-                            body=body,
-                            workflow_run=workflow_run,
-                            error=e,
-                        )
                         events.put({"type": "error", "error": str(e)})
 
                 thread = threading.Thread(target=run_filter, daemon=True)
@@ -406,18 +267,12 @@ def create_workflows_router(
 
             return StreamingResponse(generate(), media_type="application/x-ndjson")
         try:
-            payload = filter_disclosures_payload(body)
-            return _finish_filter_workflow(
-                payload,
-                body=body,
-                workflow_run=workflow_run,
+            return execute_filter_workflow_payload(
+                body,
+                workflow_run,
+                filter_payload_builder=filter_disclosures_payload,
             )
         except Exception as exc:
-            _fail_filter_workflow(
-                body=body,
-                workflow_run=workflow_run,
-                error=exc,
-            )
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/disclosures/filter/preset")

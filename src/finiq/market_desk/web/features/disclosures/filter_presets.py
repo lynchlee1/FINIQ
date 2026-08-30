@@ -11,15 +11,17 @@ import os
 from pathlib import Path
 import shutil
 import threading
-from typing import Any
+from typing import Any, Callable
 import uuid
 import warnings
 
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
     atomic_write_json,
     resolve_disclosure_workspace,
     validate_workspace_mode,
 )
+from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
 
 FILTER_WORKFLOW_FORMAT = "finiq_disclosure_filter_workflow"
 FILTER_WORKFLOW_DIRECTORY_FORMAT = "finiq_disclosure_filter_workflow_directory"
@@ -1397,3 +1399,149 @@ def migrate_filter_workflow_storage(data_root: object) -> dict[str, Any]:
         "migrated": migrated,
         "unchanged": unchanged,
     }
+
+
+def _filter_output_directory(value: object) -> str:
+    output_text = str(value or "").strip()
+    if not output_text:
+        raise ValueError("filter output directory is required")
+    output_root = Path(output_text).expanduser().resolve()
+    if output_root.suffix.lower() == ".json" or (
+        output_root.exists() and not output_root.is_dir()
+    ):
+        raise ValueError("filter output path must be a directory")
+    return str(output_root)
+
+
+def _write_filter_transfer_file(
+    payload: dict[str, Any],
+    *,
+    output_directory: str,
+    mode: object,
+    parent_mode: object = None,
+) -> dict[str, Any]:
+    normalized_mode = validate_workspace_mode(mode)
+    output_root = Path(_filter_output_directory(output_directory))
+    if parent_mode is not None and str(parent_mode).strip():
+        normalized_parent = validate_workspace_mode(parent_mode)
+        if normalized_parent == normalized_mode:
+            raise ValueError("parent_mode must be different from mode")
+        transfer_path = (
+            output_root
+            / normalized_parent
+            / "subfilters"
+            / normalized_mode
+            / "filtered.json"
+        )
+    else:
+        transfer_path = output_root / normalized_mode / "filtered.json"
+
+    payload["mode"] = normalized_mode
+    acpt_numbers = payload.get("external_html_download_acpt_numbers")
+    if not isinstance(acpt_numbers, list):
+        raise ValueError("external_html_download_acpt_numbers must be a list")
+    atomic_write_json(transfer_path, payload)
+    return {
+        "format": payload.get("format", ""),
+        "path": str(transfer_path),
+        "acpt_numbers": len(acpt_numbers),
+    }
+
+
+def prepare_filter_workflow_execution(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    body = apply_workspace_defaults("filter", payload)
+    body["mode"] = validate_workspace_mode(body.get("mode"))
+    body["include_external_html_download_acpt_numbers"] = True
+    body["external_html_transfer_path"] = _filter_output_directory(
+        body.get("external_html_transfer_path")
+    )
+    workflow_run = begin_filter_workflow_payload(body)
+    if "parent_acpt_numbers" in workflow_run:
+        body["acpt_numbers"] = workflow_run["parent_acpt_numbers"]
+        body["restrict_acpt_numbers"] = True
+    body["source_offset"] = workflow_run["source_offset"]
+    body["source_expected_count"] = workflow_run["source_expected_count"]
+    body["source_expected_fingerprint"] = workflow_run[
+        "source_expected_fingerprint"
+    ]
+    return body, workflow_run
+
+
+def execute_filter_workflow_payload(
+    body: dict[str, Any],
+    workflow_run: dict[str, Any],
+    *,
+    filter_payload_builder: Callable[..., dict[str, Any]],
+    progress_callback: Callable[[Any], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    try:
+        payload = filter_payload_builder(
+            body,
+            progress_callback=progress_callback,
+            cancel_check=cancel_check,
+        )
+        mark_filter_workflow_query_completed(
+            data_root=body.get("data_root"),
+            mode=workflow_run["mode"],
+            run_id=workflow_run["run_id"],
+            summary=payload.get("summary"),
+            parent_mode=workflow_run.get("parent_mode"),
+        )
+        completed_workflow = complete_filter_workflow_payload(
+            data_root=body.get("data_root"),
+            mode=workflow_run["mode"],
+            run_id=workflow_run["run_id"],
+            result=payload,
+            parent_mode=workflow_run.get("parent_mode"),
+        )
+        merged_result = completed_workflow.pop("result")
+        merged_result["external_html_download_transfer"] = (
+            _write_filter_transfer_file(
+                merged_result,
+                output_directory=str(
+                    body.get("external_html_transfer_path") or ""
+                ).strip(),
+                mode=body.get("mode"),
+                parent_mode=body.get("parent_mode"),
+            )
+        )
+        merged_result["filter_workflow"] = completed_workflow
+        return merged_result
+    except Exception as error:
+        if isinstance(error, FilterCancelled):
+            interrupt_filter_workflow_payload(
+                data_root=body.get("data_root"),
+                mode=workflow_run["mode"],
+                run_id=workflow_run["run_id"],
+                partial_result=error.partial_payload,
+                parent_mode=workflow_run.get("parent_mode"),
+            )
+        else:
+            fail_filter_workflow_payload(
+                data_root=body.get("data_root"),
+                mode=workflow_run["mode"],
+                run_id=workflow_run["run_id"],
+                error=error,
+                parent_mode=workflow_run.get("parent_mode"),
+            )
+        raise
+
+
+def run_filter_workflow_payload(
+    payload: dict[str, Any],
+    *,
+    filter_payload_builder: Callable[..., dict[str, Any]],
+    progress_callback: Callable[[Any], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict[str, Any]:
+    body, workflow_run = prepare_filter_workflow_execution(payload)
+    return execute_filter_workflow_payload(
+        body,
+        workflow_run,
+        filter_payload_builder=filter_payload_builder,
+        progress_callback=progress_callback,
+        cancel_check=cancel_check,
+    )
