@@ -172,11 +172,21 @@ def filter_disclosures_payload(
             "01단계부터 다시 실행하세요."
         ) from exc
     total_records = _sqlite_manifest_total_disclosures(sqlite_manifest)
+    restricted_acpt_numbers = acpt_numbers if restrict_acpt_numbers else None
+    source_records = (
+        len(restricted_acpt_numbers)
+        if restricted_acpt_numbers is not None
+        else total_records
+    )
     source_fingerprint, expected_prefix_fingerprint = (
         _sqlite_manifest_content_fingerprints(
             sqlite_manifest_path,
             sqlite_manifest,
-            prefix_count=source_expected_count,
+            prefix_count=(
+                None
+                if restricted_acpt_numbers is not None
+                else source_expected_count
+            ),
         )
     )
     _validate_sqlite_manifest_content_fingerprint(
@@ -184,17 +194,23 @@ def filter_disclosures_payload(
         sqlite_manifest,
         actual_fingerprint=source_fingerprint,
     )
-    if source_offset > 0 and (
-        source_expected_count is None
-        or source_expected_fingerprint is None
-        or expected_prefix_fingerprint != source_expected_fingerprint
-    ):
-        source_offset = 0
-    target_records = total_records - source_offset
+    if source_offset > 0:
+        incremental_source_matches = source_expected_fingerprint is not None and (
+            (
+                source_expected_count == source_records
+                and source_fingerprint == source_expected_fingerprint
+            )
+            if restricted_acpt_numbers is not None
+            else expected_prefix_fingerprint == source_expected_fingerprint
+        )
+        if not incremental_source_matches:
+            source_offset = 0
+    target_records = source_records - source_offset
     records = _iter_sqlite_manifest_disclosure_records(
         sqlite_manifest_path,
         sqlite_manifest,
         offset=source_offset,
+        acpt_numbers=restricted_acpt_numbers,
     )
     filters = {
         "filter_blocks": filter_blocks,
@@ -224,7 +240,7 @@ def filter_disclosures_payload(
                     sqlite_manifest_path=sqlite_manifest_path,
                     filters=filters,
                     source_offset=source_offset,
-                    source_disclosures=total_records,
+                    source_disclosures=source_records,
                     target_disclosures=target_records,
                     inspected_disclosures=inspected_count,
                     matched_disclosures=matched_count,
@@ -320,7 +336,7 @@ def filter_disclosures_payload(
         sqlite_manifest_path=sqlite_manifest_path,
         filters=filters,
         source_offset=source_offset,
-        source_disclosures=total_records,
+        source_disclosures=source_records,
         target_disclosures=target_records,
         inspected_disclosures=inspected_count,
         matched_disclosures=matched_count,
@@ -350,7 +366,10 @@ def search_disclosure_titles_payload(
         resolve_disclosure_workspace(data_root).table / "sqlite_manifest.json"
     )
     sqlite_manifest = _load_sqlite_manifest(sqlite_manifest_path)
-    filter_blocks = _validate_filter_blocks(body.get("filter_blocks") or [])
+    filter_blocks_value = body.get("filter_blocks")
+    filter_blocks = _validate_filter_blocks(
+        [] if filter_blocks_value is None else filter_blocks_value
+    )
     shards = list(sqlite_manifest.get("shards") or [])
     filter_workers = _resolve_filter_workers(body.get("filter_workers"), len(shards))
     _validate_sqlite_manifest_counts(

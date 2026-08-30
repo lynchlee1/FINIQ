@@ -326,7 +326,6 @@ export default function FilterPage() {
         external_html_transfer_path: htmlTransferPath,
       } : {}),
       filter_blocks: normalizeDisclosureConditionBlocks(conditions),
-      title_expression: "",
       include_external_html_download_acpt_numbers: true,
       filter_workers: configuredWorkers,
       progress_interval: configuredProgressInterval,

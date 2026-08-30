@@ -380,6 +380,7 @@ def _iter_sqlite_manifest_disclosure_records(
     *,
     offset: int = 0,
     prepare: bool = True,
+    acpt_numbers: set[str] | None = None,
 ) -> Any:
     if offset < 0:
         raise ValueError("SQLite disclosure offset must be >= 0")
@@ -388,11 +389,12 @@ def _iter_sqlite_manifest_disclosure_records(
     )
     quoted_table = _quoted_sqlite_identifier(table_name)
     remaining_offset = offset
+    seen_acpt_numbers: set[str] = set()
     for shard in sorted(
         list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")
     ):
         shard_disclosures = int(shard.get("disclosures") or 0)
-        if remaining_offset >= shard_disclosures:
+        if acpt_numbers is None and remaining_offset >= shard_disclosures:
             remaining_offset -= shard_disclosures
             continue
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
@@ -428,19 +430,48 @@ def _iter_sqlite_manifest_disclosure_records(
                     "source_page",
                 ]
             )
-            cursor = connection.execute(
-                f"""
-                SELECT
-                    {selected_columns}
-                FROM {quoted_table}
-                ORDER BY id
-                LIMIT -1 OFFSET ?
-                """,
-                (remaining_offset,),
-            )
-            remaining_offset = 0
+            if acpt_numbers is None:
+                cursor = connection.execute(
+                    f"""
+                    SELECT
+                        {selected_columns}
+                    FROM {quoted_table}
+                    ORDER BY id
+                    LIMIT -1 OFFSET ?
+                    """,
+                    (remaining_offset,),
+                )
+                remaining_offset = 0
+            else:
+                connection.execute(
+                    "CREATE TEMP TABLE finiq_filter_acpt_numbers "
+                    "(acpt_no TEXT PRIMARY KEY) WITHOUT ROWID"
+                )
+                connection.executemany(
+                    "INSERT INTO finiq_filter_acpt_numbers (acpt_no) VALUES (?)",
+                    ((acpt_no,) for acpt_no in acpt_numbers),
+                )
+                cursor = connection.execute(
+                    f"""
+                    SELECT
+                        {selected_columns}
+                    FROM {quoted_table}
+                    WHERE acpt_no IN (
+                        SELECT acpt_no FROM finiq_filter_acpt_numbers
+                    )
+                    ORDER BY id
+                    """
+                )
             for row in cursor:
                 record = dict(row)
+                if acpt_numbers is not None:
+                    acpt_no = str(record.get("acpt_no") or "")
+                    if acpt_no in seen_acpt_numbers:
+                        continue
+                    seen_acpt_numbers.add(acpt_no)
+                    if remaining_offset > 0:
+                        remaining_offset -= 1
+                        continue
                 record["title_flags"] = list(
                     json.loads(str(record.get("title_flags_json") or "[]"))
                 )

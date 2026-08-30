@@ -65,6 +65,33 @@ _LEGACY_OPERATIONAL_FILTER_KEYS = {
     "wait_seconds",
     "worker_count",
 }
+_FORBIDDEN_WORKFLOW_FILTER_INPUT_KEYS = {
+    "acpt_numbers",
+    "company_keyword",
+    "end_date",
+    "exclude_title_keywords",
+    "market",
+    "restrict_acpt_numbers",
+    "source_expected_count",
+    "source_expected_fingerprint",
+    "source_offset",
+    "start_date",
+    "submitter_keyword",
+    "title_expression",
+    "title_keywords",
+    "title_match_mode",
+}
+_WORKFLOW_FILTER_DEFAULTS = {
+    "company_keyword": "",
+    "end_date": "",
+    "exclude_title_keywords": [],
+    "market": "전체",
+    "start_date": "",
+    "submitter_keyword": "",
+    "title_expression": "",
+    "title_keywords": [],
+    "title_match_mode": "or",
+}
 
 
 def _integrity_error(message: str) -> ValueError:
@@ -243,6 +270,7 @@ def _validate_filter_result(
     condition_blocks: list[dict[str, Any]],
     require_complete: bool,
     allow_legacy_paths: bool = False,
+    allow_acpt_scope: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("format") != FILTER_RESULT_FORMAT:
         raise ValueError("filter workflow result has an invalid format")
@@ -265,6 +293,15 @@ def _validate_filter_result(
     filters = payload.get("filters")
     if not isinstance(filters, dict) or filters.get("filter_blocks") != condition_blocks:
         raise ValueError("filter workflow result conditions do not match the workflow")
+    for key, expected in _WORKFLOW_FILTER_DEFAULTS.items():
+        if key in filters and filters[key] != expected:
+            raise ValueError(
+                f"filter workflow result contains an unrecorded filter: {key}"
+            )
+    if not allow_acpt_scope and filters.get("acpt_numbers", []) != []:
+        raise ValueError(
+            "filter workflow result contains an unrecorded filter: acpt_numbers"
+        )
     disclosures = payload.get("disclosures")
     if not isinstance(disclosures, list):
         raise ValueError("filter workflow result disclosures must be a list")
@@ -479,6 +516,7 @@ def _read_workflow(
             condition_blocks=normalized["condition_blocks"],
             require_complete=True,
             allow_legacy_paths=allow_legacy_storage,
+            allow_acpt_scope=normalized.get("parent_mode") is not None,
         )
         result_fingerprint = _canonical_result_sha256(result)
         stored_fingerprint = str(payload.get("result_fingerprint") or "").strip()
@@ -511,6 +549,7 @@ def _read_workflow(
             condition_blocks=normalized["condition_blocks"],
             require_complete=False,
             allow_legacy_paths=allow_legacy_storage,
+            allow_acpt_scope=normalized.get("parent_mode") is not None,
         )
         pending_fingerprint = _canonical_payload_sha256(pending)
         stored_fingerprint = str(payload.get("pending_fingerprint") or "").strip()
@@ -1020,6 +1059,7 @@ def _merge_filter_results(
     initial_offset: int,
     source_disclosures: int,
     complete: bool,
+    allow_acpt_scope: bool = False,
 ) -> dict[str, Any]:
     cursor = initial_offset
     disclosures_by_acpt_no: dict[str, dict[str, Any]] = {}
@@ -1033,6 +1073,7 @@ def _merge_filter_results(
             payload,
             condition_blocks=condition_blocks,
             require_complete=bool((payload.get("integrity") or {}).get("complete")),
+            allow_acpt_scope=allow_acpt_scope,
         )
         (
             _payload_source_count,
@@ -1231,6 +1272,7 @@ def complete_filter_workflow_payload(
             result,
             condition_blocks=workflow["condition_blocks"],
             require_complete=True,
+            allow_acpt_scope=parent_result is not None,
         )
         source_disclosures = _filter_result_counts(current_result)[0]
         current_source_offset = _filter_result_counts(current_result)[1]
@@ -1250,6 +1292,7 @@ def complete_filter_workflow_payload(
             initial_offset=0,
             source_disclosures=source_disclosures,
             complete=True,
+            allow_acpt_scope=parent_result is not None,
         )
         merged_result["mode"] = workflow["mode"]
         if parent_result is not None:
@@ -1305,6 +1348,7 @@ def interrupt_filter_workflow_payload(
                 partial_result,
                 condition_blocks=workflow["condition_blocks"],
                 require_complete=False,
+                allow_acpt_scope=workflow.get("parent_mode") is not None,
             )
             if isinstance(partial_result, dict)
             else None
@@ -1338,6 +1382,7 @@ def interrupt_filter_workflow_payload(
             initial_offset=committed_count,
             source_disclosures=source_disclosures,
             complete=False,
+            allow_acpt_scope=workflow.get("parent_mode") is not None,
         )
         document["status"] = "interrupted"
         _set_workflow_pending(
@@ -1533,21 +1578,17 @@ def migrate_filter_workflow_storage(data_root: object) -> dict[str, Any]:
                     document=raw,
                     allow_legacy_storage=True,
                 )
-                stored_values = [document.get("result"), document.get("pending")]
-                parent_mode = document.get("parent_mode")
-                current_parent_fingerprint = (
-                    _completed_parent_fingerprint(directory.parent, parent_mode)
-                    if parent_mode is not None
-                    else None
+                result = document.get("result")
+                pending = document.get("pending")
+                pending_result = (
+                    pending.get("result") if isinstance(pending, dict) else None
                 )
                 needs_migration = any(
                     _find_persisted_path_key(value) is not None
-                    or _has_legacy_operational_filter_settings(value)
-                    for value in stored_values
-                ) or (
-                    current_parent_fingerprint is not None
-                    and document.get("parent_result_fingerprint")
-                    != current_parent_fingerprint
+                    for value in (result, pending)
+                ) or any(
+                    _has_legacy_operational_filter_settings(value)
+                    for value in (result, pending_result)
                 )
                 if not needs_migration:
                     _read_workflow(path)
@@ -1559,12 +1600,6 @@ def migrate_filter_workflow_storage(data_root: object) -> dict[str, Any]:
                     document=raw,
                     allow_legacy_storage=True,
                 )
-                parent_mode = document.get("parent_mode")
-                current_parent_fingerprint = (
-                    _completed_parent_fingerprint(directory.parent, parent_mode)
-                    if parent_mode is not None
-                    else None
-                )
             result = document.get("result")
             if isinstance(result, dict):
                 _remove_persisted_path_fields(result)
@@ -1574,19 +1609,9 @@ def migrate_filter_workflow_storage(data_root: object) -> dict[str, Any]:
             pending = document.get("pending")
             if isinstance(pending, dict):
                 _remove_persisted_path_fields(pending)
-                _remove_legacy_operational_filter_settings(pending)
+                _remove_legacy_operational_filter_settings(pending.get("result"))
                 document.pop("_pending_fingerprint", None)
                 document.pop("_pending_file", None)
-            if current_parent_fingerprint is not None:
-                document["parent_result_fingerprint"] = current_parent_fingerprint
-                if isinstance(result, dict):
-                    result["parent_result_fingerprint"] = current_parent_fingerprint
-                if isinstance(pending, dict) and isinstance(
-                    pending.get("result"), dict
-                ):
-                    pending["result"][
-                        "parent_result_fingerprint"
-                    ] = current_parent_fingerprint
             _write_workflow(path, document)
             _read_workflow(path)
             migrated.append(str(path))
@@ -1647,6 +1672,11 @@ def _write_filter_transfer_file(
 def prepare_filter_workflow_execution(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    for key in sorted(_FORBIDDEN_WORKFLOW_FILTER_INPUT_KEYS):
+        if key in payload:
+            raise ValueError(
+                f"{key} is not allowed for a saved filter workflow"
+            )
     body = apply_workspace_defaults("filter", payload)
     body["mode"] = validate_workspace_mode(body.get("mode"))
     body["include_external_html_download_acpt_numbers"] = True

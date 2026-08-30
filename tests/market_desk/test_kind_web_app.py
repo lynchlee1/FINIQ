@@ -861,6 +861,83 @@ def test_filter_disclosures_runs_derived_filter_with_parent_membership(
     assert len(transferred["parent_result_fingerprint"]) == 64
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("title_expression", '"전환사채"'),
+        ("title_keywords", ["전환사채"]),
+        ("exclude_title_keywords", ["정정"]),
+        ("title_match_mode", "and"),
+        ("company_keyword", "테스트"),
+        ("submitter_keyword", "거래소"),
+        ("market", "코스피"),
+        ("start_date", "2025-01-01"),
+        ("end_date", "2025-12-31"),
+        ("acpt_numbers", ["20250101000001"]),
+        ("restrict_acpt_numbers", True),
+        ("source_offset", 1),
+        ("source_expected_count", 1),
+        ("source_expected_fingerprint", "0" * 64),
+    ],
+)
+def test_filter_workflow_rejects_result_filters_outside_saved_conditions(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+
+    with pytest.raises(
+        ValueError,
+        match=rf"{field} is not allowed for a saved filter workflow",
+    ):
+        filter_presets.prepare_filter_workflow_execution(
+            {
+                "data_root": str(data_root),
+                "mode": "bond_issuance",
+                "filter_blocks": [],
+                "external_html_transfer_path": str(tmp_path / "filtered"),
+                field: value,
+            }
+        )
+
+    workflow = filter_presets.manage_filter_presets_payload(
+        {"data_root": str(data_root), "action": "list"}
+    )["presets"][0]
+    assert workflow["status"] == "ready"
+
+
+def test_filter_workflow_rejects_stored_unrecorded_result_filter(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    result_path = workflow_path.with_name("filtered.json")
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["filters"]["title_keywords"] = ["전환사채"]
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    document["result_fingerprint"] = filter_presets._canonical_result_sha256(result)
+    workflow_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="unrecorded filter: title_keywords",
+    ):
+        filter_presets.load_filter_workflow_result_payload(
+            data_root=str(data_root),
+            mode="bond_issuance",
+            condition_blocks=[],
+        )
+
+
 def test_filter_disclosures_stream_reports_long_progress_silence(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1973,7 +2050,53 @@ def test_filter_storage_migration_removes_legacy_operational_settings(
     )
 
 
-def test_filter_storage_migration_refreshes_derived_parent_fingerprint(
+def test_filter_storage_migration_removes_pending_operational_settings(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    run = filter_presets.begin_filter_workflow_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+        }
+    )
+    filter_presets.interrupt_filter_workflow_payload(
+        data_root=data_root,
+        mode="bond_issuance",
+        run_id=run["run_id"],
+        partial_result=_filter_result(
+            source_disclosures=2,
+            source_offset=0,
+            inspected_disclosures=1,
+            complete=False,
+            disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+        ),
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    pending_path = workflow_path.with_name("filter.pending.json")
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    pending["result"]["filters"]["filter_workers"] = 8
+    pending_path.write_text(json.dumps(pending), encoding="utf-8")
+    document["pending_fingerprint"] = filter_presets._canonical_payload_sha256(
+        pending
+    )
+    workflow_path.write_text(json.dumps(document), encoding="utf-8")
+
+    migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
+
+    assert migrated["migrated"] == [str(workflow_path)]
+    migrated_pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert "filter_workers" not in migrated_pending["result"]["filters"]
+    migrated_document = json.loads(workflow_path.read_text(encoding="utf-8"))
+    assert migrated_document["pending_fingerprint"] == (
+        filter_presets._canonical_payload_sha256(migrated_pending)
+    )
+
+
+def test_filter_storage_migration_keeps_matching_derived_parent_fingerprint(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
@@ -2027,6 +2150,60 @@ def test_filter_storage_migration_refreshes_derived_parent_fingerprint(
         condition_blocks=[],
     )
     assert loaded["disclosures"][0]["acpt_no"] == "20260101000001"
+
+
+def test_filter_storage_migration_keeps_changed_parent_result_stale(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    original_rows = [{"acpt_no": "20260101000001", "title": "A"}]
+    _save_filter_workflow(data_root, mode="parent")
+    _complete_filter_workflow(data_root, mode="parent", disclosures=original_rows)
+    filter_presets.manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": "child",
+                "parent_mode": "parent",
+                "condition_blocks": [],
+            },
+        }
+    )
+    _complete_filter_workflow(
+        data_root,
+        mode="child",
+        parent_mode="parent",
+        disclosures=original_rows,
+    )
+    child_path = (
+        data_root / "03-filter" / "parent" / "subfilters" / "child" / "filter.json"
+    )
+    child_before = json.loads(child_path.read_text(encoding="utf-8"))
+
+    _complete_filter_workflow(
+        data_root,
+        mode="parent",
+        disclosures=[{"acpt_no": "20260101000002", "title": "B"}],
+    )
+    parent_path = data_root / "03-filter" / "parent" / "filter.json"
+    parent = json.loads(parent_path.read_text(encoding="utf-8"))
+    assert child_before["parent_result_fingerprint"] != parent["result_fingerprint"]
+
+    migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
+
+    assert str(child_path) in migrated["unchanged"]
+    child_after = json.loads(child_path.read_text(encoding="utf-8"))
+    assert child_after["parent_result_fingerprint"] == child_before[
+        "parent_result_fingerprint"
+    ]
+    with pytest.raises(ValueError, match="stale because parent result changed"):
+        filter_presets.load_filter_workflow_result_payload(
+            data_root=str(data_root),
+            mode="child",
+            parent_mode="parent",
+            condition_blocks=[],
+        )
 
 
 def test_hashed_filter_result_migrates_to_canonical_filename(tmp_path: Path) -> None:

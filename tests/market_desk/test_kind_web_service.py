@@ -833,6 +833,19 @@ def test_search_disclosure_titles_payload_returns_distinct_db_titles(
     assert "disclosures" not in payload
 
 
+@pytest.mark.parametrize("filter_blocks", [{}, "", False, 0])
+def test_search_disclosure_titles_rejects_falsey_non_list_filter_blocks(
+    tmp_path: Path,
+    filter_blocks: object,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+
+    with pytest.raises(ValueError, match="filter_blocks must be a list"):
+        search_disclosure_titles_payload(
+            {"data_root": str(tmp_path), "filter_blocks": filter_blocks}
+        )
+
+
 def test_search_disclosure_titles_payload_applies_shared_boolean_conditions_in_sqlite(
     tmp_path: Path,
 ) -> None:
@@ -956,6 +969,53 @@ def test_filter_disclosures_payload_filters_only_rows_after_source_offset(
         "search_result_disclosures": 1,
         "inspected_disclosures": 1,
     }
+
+
+def test_filter_disclosures_payload_reads_only_restricted_acpt_numbers(
+    tmp_path: Path,
+) -> None:
+    _write_filter_manifest_fixture(tmp_path)
+
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [],
+            "acpt_numbers": ["1"],
+            "restrict_acpt_numbers": True,
+        }
+    )
+
+    assert payload["summary"]["source_disclosures"] == 1
+    assert payload["summary"]["target_disclosures"] == 1
+    assert payload["summary"]["inspected_disclosures"] == 1
+    assert [row["acpt_no"] for row in payload["disclosures"]] == ["1"]
+
+
+def test_filter_disclosures_payload_resumes_restricted_acpt_numbers(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _write_filter_manifest_fixture(tmp_path)
+    source_fingerprint = json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )["content_fingerprint"]
+
+    payload = filter_disclosures_payload(
+        {
+            "data_root": str(tmp_path),
+            "filter_blocks": [],
+            "acpt_numbers": ["1"],
+            "restrict_acpt_numbers": True,
+            "source_offset": 1,
+            "source_expected_count": 1,
+            "source_expected_fingerprint": source_fingerprint,
+        }
+    )
+
+    assert payload["summary"]["source_disclosures"] == 1
+    assert payload["summary"]["source_offset"] == 1
+    assert payload["summary"]["target_disclosures"] == 0
+    assert payload["summary"]["inspected_disclosures"] == 0
+    assert payload["disclosures"] == []
 
 
 @pytest.mark.parametrize("field", ["source_offset", "source_expected_count"])

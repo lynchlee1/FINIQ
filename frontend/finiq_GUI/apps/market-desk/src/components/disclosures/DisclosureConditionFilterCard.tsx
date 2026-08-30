@@ -264,6 +264,13 @@ function isEmptyDisclosureConditionBlocks(conditions: DisclosureConditionBlock[]
 
 export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureConditionBlock[] {
   if (!Array.isArray(value)) throw new Error("condition_blocks must be an array");
+  if (
+    value.length === 1
+    && value[0]
+    && typeof value[0] === "object"
+    && !Array.isArray(value[0])
+    && isEmptyDisclosureConditionBlocks(value as DisclosureConditionBlock[])
+  ) return [];
   const blocks = value.map((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       throw new Error(`condition_blocks[${index}] must be an object`);

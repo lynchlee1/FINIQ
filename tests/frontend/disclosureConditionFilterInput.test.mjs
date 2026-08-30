@@ -23,6 +23,30 @@ async function loadHelper() {
   return import(pathToFileURL(tempPath).href);
 }
 
+async function loadNormalizationHelper() {
+  const source = await readFile(disclosureConditionCardPath, "utf8");
+  const declarations = [
+    source.match(/export function makeEmptyDisclosureCondition\([\s\S]*?\n\}/)?.[0],
+    source.match(/function isEmptyDisclosureConditionBlocks\([\s\S]*?\n\}/)?.[0],
+    source.match(/export function normalizeDisclosureConditionBlocks\([\s\S]*?\n\}/)?.[0],
+  ];
+  declarations.forEach((declaration) => assert.ok(declaration));
+  const compiled = ts.transpileModule(
+    `const DISCLOSURE_FILTER_FIELD_OPTIONS = [["title", "제목"]];\n`
+      + `function isOperatorAllowedForField() { return true; }\n`
+      + declarations.join("\n"),
+    {
+      compilerOptions: {
+        module: ts.ModuleKind.ES2022,
+        target: ts.ScriptTarget.ES2022,
+      },
+    },
+  );
+  const tempPath = path.join(tmpdir(), `finiq-filter-normalize-${Date.now()}-${Math.random()}.mjs`);
+  await writeFile(tempPath, compiled.outputText);
+  return import(pathToFileURL(tempPath).href);
+}
+
 test("condition search filter Command+Backspace clears the controlled value", async () => {
   const source = await readFile(disclosureConditionCardPath, "utf8");
   const { nextValueAfterModifierBackspace } = await loadHelper();
@@ -42,4 +66,22 @@ test("between conditions require exactly two values before save or execution", a
   assert.match(source, /if \(row\.operator === "between"\)/);
   assert.match(source, /if \(values\.length !== 2\)/);
   assert.match(source, /between operator requires exactly two values/);
+});
+
+test("the untouched empty condition serializes as no filter blocks", async () => {
+  const {
+    makeEmptyDisclosureCondition,
+    normalizeDisclosureConditionBlocks,
+  } = await loadNormalizationHelper();
+
+  assert.deepEqual(
+    normalizeDisclosureConditionBlocks([makeEmptyDisclosureCondition()]),
+    [],
+  );
+  assert.throws(
+    () => normalizeDisclosureConditionBlocks([
+      { ...makeEmptyDisclosureCondition(), not: true },
+    ]),
+    /value is required/,
+  );
 });
