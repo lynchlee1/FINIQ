@@ -1163,9 +1163,6 @@ def test_existing_filter_route_uses_workspace_stage_paths(
             "format": "kind_disclosure_filter_v1",
             "source_type": "sqlite_manifest",
             "source_fingerprint": "0" * 64,
-            "source_sqlite_manifest_path": str(
-                data_root / "02-table" / "sqlite_manifest.json"
-            ),
             "filters": {"filter_blocks": []},
             "summary": {
                 "source_disclosures": 0,

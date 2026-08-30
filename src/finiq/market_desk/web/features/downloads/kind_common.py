@@ -47,6 +47,7 @@ from finiq.market_desk.web.jobs import (
 @dataclass(slots=True)
 class DownloadJob:
     id: str
+    input_fingerprint: str = ""
     status: str = "queued"
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -140,8 +141,9 @@ def _normalize_disclosure_type_groups(
         if not isinstance(selected, list):
             raise ValueError(f"disclosure_type_groups.{suffix} must be an array")
         allowed = {code for code, _name in items}
-        codes = [str(code) for code in selected]
-        unsupported_codes = sorted({code for code in codes if code not in allowed})
+        selected_codes = {str(code) for code in selected}
+        codes = [code for code, _name in items if code in selected_codes]
+        unsupported_codes = sorted(selected_codes.difference(allowed))
         if unsupported_codes:
             raise ValueError(
                 f"unsupported disclosure_type_groups.{suffix} codes: "
@@ -391,10 +393,6 @@ def _download_input_snapshot_from_payload(
         "disclosure_type_groups": _normalize_disclosure_type_groups(payload),
         "last_report_only": _as_bool(payload, "last_report_only"),
         "include_previous_disclosures": None,
-        "wait_seconds_between_requests": _as_float(
-            payload, "wait_seconds", 1.0
-        ),
-        "timeout": _as_float(payload, "timeout", 20.0),
     }
     return validate_kind_workflow_input_snapshot(snapshot)
 
@@ -447,13 +445,64 @@ def _snapshot_filters_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
 
 def _current_filters_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
-        "company_name": str(payload.get("company_name") or ""),
-        "submitter_name": str(payload.get("submitter_name") or ""),
-        "market_label": str(payload.get("market_label") or "전체"),
-        "securities_label": str(payload.get("securities_label") or "전체"),
+        "company_name": str(payload.get("company_name") or "").strip(),
+        "submitter_name": str(payload.get("submitter_name") or "").strip(),
+        "market_label": str(payload.get("market_label") or "전체").strip()
+        or "전체",
+        "securities_label": str(payload.get("securities_label") or "전체").strip()
+        or "전체",
         "disclosure_type_groups": _normalize_disclosure_type_groups(payload) or {},
-        "last_report_only": _as_bool(payload, "last_report_only"),
+        "last_report_only": bool(_as_bool(payload, "last_report_only")),
     }
+
+
+def _download_inspection_input_fingerprint(payload: dict[str, Any]) -> str:
+    """Bind an inspection receipt to inputs that affect files or their validity."""
+    if _as_int(payload, "start_page", 1) != 1 or payload.get("end_page") not in (
+        "",
+        None,
+    ):
+        raise ValueError(
+            "페이지 범위 제한은 더 이상 지원하지 않습니다. 전체 결과를 받으세요."
+        )
+    output_directory_raw = str(payload.get("output_directory") or "").strip()
+    if not output_directory_raw:
+        raise ValueError("output_directory is required")
+    start_date_raw = str(payload.get("start_date") or "").strip()
+    end_date_raw = str(payload.get("end_date") or "").strip()
+    if bool(start_date_raw) != bool(end_date_raw):
+        raise ValueError("start_date and end_date must be provided together")
+    if start_date_raw:
+        start_date = _parse_iso_date(start_date_raw, "start_date")
+        end_date = _parse_iso_date(end_date_raw, "end_date")
+        if end_date < start_date:
+            raise ValueError("end_date must be >= start_date")
+        normalized_start_date = start_date.isoformat()
+        normalized_end_date = end_date.isoformat()
+    else:
+        normalized_start_date = ""
+        normalized_end_date = ""
+    mode = str(payload.get("mode") or "single").strip().lower()
+    if mode not in {"single", "yearly"}:
+        raise ValueError("mode must be single or yearly")
+    page_size = _as_int(payload, "page_size", 100)
+    if page_size < 1:
+        raise ValueError("page_size must be >= 1")
+    normalized = {
+        "mode": mode,
+        "output_directory": str(Path(output_directory_raw).expanduser().resolve()),
+        "start_date": normalized_start_date,
+        "end_date": normalized_end_date,
+        "page_size": page_size,
+        "filters": _current_filters_payload(payload),
+    }
+    encoded = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _filters_payloads_match(
@@ -464,7 +513,7 @@ def _filters_payloads_match(
         for suffix, codes in dict(
             payload.get("disclosure_type_groups") or {}
         ).items():
-            normalized_codes = sorted(str(code) for code in codes)
+            normalized_codes = sorted({str(code) for code in codes})
             if normalized_codes:
                 normalized[str(suffix)] = normalized_codes
         return normalized
@@ -524,7 +573,7 @@ def _download_cleanup_targets(
     end_date = _parse_iso_date(end_date_raw, "end_date")
     if end_date < start_date:
         raise ValueError("end_date must be >= start_date")
-    targets = [
+    expected_targets = [
         (
             output_directory
             / f"{chunk_start.strftime('%Y%m%d')}_{chunk_end.strftime('%Y%m%d')}",
@@ -532,7 +581,21 @@ def _download_cleanup_targets(
         )
         for chunk_start, chunk_end in _split_yearly_ranges(start_date, end_date)
     ]
-    return output_directory, targets
+    targets_by_path = {str(folder): (folder, size) for folder, size in expected_targets}
+    if output_directory.is_dir():
+        for child in output_directory.iterdir():
+            if child.is_symlink():
+                if child.is_dir() and _result_body_files(child):
+                    raise ValueError(
+                        "KIND download output directory must not contain "
+                        f"symbolic-link result folders: {child}"
+                    )
+                continue
+            if child.is_dir() and _result_body_files(child):
+                targets_by_path[str(child.resolve())] = (child.resolve(), page_size)
+        if _result_body_files(output_directory):
+            targets_by_path[str(output_directory)] = (output_directory, page_size)
+    return output_directory, [targets_by_path[key] for key in sorted(targets_by_path)]
 
 
 __all__ = [name for name in globals() if not name.startswith("__")]

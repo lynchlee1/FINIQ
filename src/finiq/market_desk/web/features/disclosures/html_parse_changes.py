@@ -41,7 +41,6 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
     parser_method = _require_payload_parser_method(payload)
     summary_only = bool(body.get("summary_only"))
     requested_family_id = body.get("family_id")
-    limit = _parse_limit(body.get("limit"))
     changes_only = bool(body.get("changes_only"))
 
     # Load thresholds from global config
@@ -154,10 +153,6 @@ def build_parse_change_log_payload(body: dict[str, Any]) -> dict[str, Any]:
                     "has_details": True,
                 }
             )
-
-        # Early exit if we reached the limit
-        if limit is not None and len(families) >= limit:
-            break
 
     visible_families = families
     return {

@@ -237,20 +237,14 @@ def build_ontology_graph(
         "built_at": datetime.now().isoformat(),
         "source_coverage": {
             "rights_issuance": {
-                "parsed_path": make_relative_path(rights_issuance_path) if rights_issuance_path else None,
-                "filtered_path": make_relative_path(rights_filtered_path) if rights_filtered_path else None,
                 "processed_count": 0,
                 "skipped_count": 0,
             },
             "bond_issuance": {
-                "parsed_path": make_relative_path(bond_issuance_path) if bond_issuance_path else None,
-                "filtered_path": make_relative_path(bond_filtered_path) if bond_filtered_path else None,
                 "processed_count": 0,
                 "skipped_count": 0,
             },
             "shareholder_meeting": {
-                "parsed_path": make_relative_path(shareholder_meeting_parsed_path) if shareholder_meeting_parsed_path else None,
-                "filtered_path": make_relative_path(shareholder_meeting_filtered_path) if shareholder_meeting_filtered_path else None,
                 "processed_count": 0,
                 "skipped_count": 0,
             }
@@ -1436,13 +1430,25 @@ def export_ontology_to_web_json(
             "properties": props,
         })
 
+    def without_path_metadata(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: without_path_metadata(child)
+                for key, child in value.items()
+                if str(key) not in {"path", "source_file", "source_url"}
+                and not str(key).endswith("_path")
+            }
+        if isinstance(value, list):
+            return [without_path_metadata(child) for child in value]
+        return value
+
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     out_data = {
         "format": "finiq_disclosure_graph_v1",
-        "metadata": metadata or {},
-        "nodes": web_nodes,
-        "edges": web_edges
+        "metadata": without_path_metadata(metadata or {}),
+        "nodes": without_path_metadata(web_nodes),
+        "edges": without_path_metadata(web_edges)
     }
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(out_data, f, ensure_ascii=False, indent=2)

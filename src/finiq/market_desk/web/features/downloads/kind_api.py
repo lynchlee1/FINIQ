@@ -41,6 +41,13 @@ def build_download_options_payload(
 
 def build_download_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     payload = apply_workspace_defaults("kind_download", payload)
+    if _as_int(payload, "start_page", 1) != 1 or payload.get("end_page") not in (
+        "",
+        None,
+    ):
+        raise ValueError(
+            "페이지 범위 제한은 더 이상 지원하지 않습니다. 전체 결과를 받으세요."
+        )
     output_directory_raw = str(payload.get("output_directory") or "").strip()
     if not output_directory_raw:
         raise ValueError("output_directory is required")
@@ -51,13 +58,6 @@ def build_download_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
     _parse_iso_date(start_date_raw, "start_date")
     _parse_iso_date(end_date_raw, "end_date")
 
-    start_page = _as_int(payload, "start_page", 1)
-    end_page = payload.get("end_page")
-    end_page_value = (
-        _as_int(payload, "end_page", start_page)
-        if end_page not in ("", None)
-        else start_page
-    )
     page_size = _as_int(payload, "page_size", 100)
     wait_seconds = _as_float(payload, "wait_seconds", 1.0)
     timeout = _as_float(payload, "timeout", 20.0)
@@ -72,8 +72,8 @@ def build_download_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         request_headers=DEFAULT_REQUEST_HEADERS,
         start_date=start_date_raw,
         end_date=end_date_raw,
-        start_page=start_page,
-        end_page=end_page_value,
+        start_page=1,
+        end_page=1,
         page_size=page_size,
         search_filters=_build_search_filters(payload),
         disclosure_type_groups=_normalize_disclosure_type_groups(payload),
@@ -82,7 +82,7 @@ def build_download_preview_payload(payload: dict[str, Any]) -> dict[str, Any]:
         wait_seconds_between_requests=wait_seconds,
         timeout=timeout,
     )
-    request_data = workflow.build_request_data(page_number=start_page)
+    request_data = workflow.build_request_data(page_number=1)
     return {
         "mode": str(payload.get("mode") or "single"),
         "request_data": [

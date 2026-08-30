@@ -410,14 +410,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
           </label>
         </div>
         <div class="row cols-3">
-          <label>
-            시작 페이지
-            <input id="startPage" type="number" min="1" value="1" />
-          </label>
-          <label>
-            끝 페이지 (비우면 자동 전체)
-            <input id="endPage" type="number" min="1" />
-          </label>
           <label class="checkbox-field">
             <span>최종보고서보기</span>
             <span class="checkbox-card"><input id="lastReportOnly" type="checkbox" /> 최종보고서만 조회</span>
@@ -439,7 +431,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         <div class="actions">
           <button id="previewBtn" class="muted" type="button">페이로드 미리보기</button>
           <button id="inspectBtn" class="muted" type="button">기존 파일 검사</button>
-          <button id="runBtn" class="primary" type="button">다운로드 실행</button>
         </div>
         <div id="status"></div>
         <div id="deletePanel">
@@ -481,13 +472,10 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
         pageSize: document.getElementById("pageSize"),
         waitSeconds: document.getElementById("waitSeconds"),
         timeout: document.getElementById("timeout"),
-        startPage: document.getElementById("startPage"),
-        endPage: document.getElementById("endPage"),
         lastReportOnly: document.getElementById("lastReportOnly"),
         disclosureGroups: document.getElementById("disclosureGroups"),
         previewBtn: document.getElementById("previewBtn"),
         inspectBtn: document.getElementById("inspectBtn"),
-        runBtn: document.getElementById("runBtn"),
         status: document.getElementById("status"),
         result: document.getElementById("result"),
         deletePanel: document.getElementById("deletePanel"),
@@ -500,6 +488,7 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
 
       let optionsPayload = null;
       let currentDeleteCandidates = [];
+      let currentDeletionConfirmation = "";
 
       function setStatus(message, isError = false) {
         el.status.textContent = message || "";
@@ -526,6 +515,7 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
 
       function renderDeleteCandidates(payload) {
         currentDeleteCandidates = Array.isArray(payload.deletion_candidates) ? payload.deletion_candidates : [];
+        currentDeletionConfirmation = String(payload.deletion_confirmation || "");
         el.deleteCandidates.innerHTML = "";
         currentDeleteCandidates.forEach((file) => {
           const item = document.createElement("div");
@@ -550,6 +540,7 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
           dry_run: dryRun,
           delete_confirmed: Boolean(el.deleteConfirmed.checked),
           delete_confirmation_text: String(el.deleteConfirmationText.value || "").trim(),
+          ...(dryRun ? {} : { deletion_confirmation: currentDeletionConfirmation }),
         };
         const result = await fetchJson("/api/download/inspect-folder", {
           method: "POST",
@@ -659,7 +650,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
       }
 
       function buildPayload() {
-        const endPageRaw = String(el.endPage.value || "").trim();
         return {
           mode: "yearly",
           output_directory: String(el.outputDirectory.value || "").trim(),
@@ -672,8 +662,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
           page_size: Number(el.pageSize.value || 100),
           wait_seconds: Number(el.waitSeconds.value || 1),
           timeout: Number(el.timeout.value || 20),
-          start_page: Number(el.startPage.value || 1),
-          end_page: endPageRaw ? Number(endPageRaw) : null,
           last_report_only: Boolean(el.lastReportOnly.checked),
           disclosure_type_groups: collectDisclosureGroups(),
         };
@@ -738,28 +726,6 @@ _DOWNLOAD_PAGE_HTML = """<!doctype html>
           el.deleteConfirmed.checked = false;
           el.deleteConfirmationText.value = "";
           setStatus(`기존 파일 ${result.deleted_count || 0}개를 삭제했습니다. 최신 상태 기준 성공 ${result.summary?.success || 0}/${result.summary?.total || 0}건입니다.`);
-        } catch (error) {
-          setStatus(error.message, true);
-        }
-      });
-
-      el.runBtn.addEventListener("click", async () => {
-        try {
-          setStatus("기존 다운로드 파일을 검사하는 중...");
-          const payload = buildPayload();
-          const inspection = await inspectDownloadFolder(true);
-          if ((inspection.deletion_candidate_count || 0) > 0) {
-            setStatus(`삭제 확인이 필요한 기존 파일 ${inspection.deletion_candidate_count}개가 있습니다.`);
-            return;
-          }
-          setStatus("다운로드 실행 중... (시간이 걸릴 수 있습니다)");
-          const result = await fetchJson("/api/download/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          setResult(result);
-          setStatus("다운로드 완료");
         } catch (error) {
           setStatus(error.message, true);
         }

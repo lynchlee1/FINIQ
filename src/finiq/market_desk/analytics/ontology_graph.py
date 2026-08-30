@@ -76,19 +76,15 @@ def _load_manifest(manifest_path: str | Path | None = None) -> tuple[Path, dict[
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("format") != "finiq_disclosure_table_manifest_v1":
         raise ValueError(f"Not a FINIQ disclosure SQLite manifest: {path}")
+    if payload.get("schema_version") != 4:
+        raise ValueError(f"KIND SQLite manifest schema_version must be 4: {path}")
     return path, payload
 
 
 def _shard_path(manifest_path: Path, shard: dict[str, Any]) -> Path:
-    raw_path = str(shard.get("path") or "").strip()
-    if raw_path:
-        path = Path(raw_path)
-        if path.is_absolute() and path.exists():
-            return path
-    relative_path = str(shard.get("relative_path") or "").strip()
-    if relative_path:
-        return (manifest_path.parent / relative_path).resolve()
     year = str(shard.get("year") or "").strip()
+    if len(year) != 4 or not year.isdigit():
+        raise ValueError("KIND SQLite manifest shard.year must be a four-digit year")
     return (manifest_path.parent / f"{year}.sqlite").resolve()
 
 

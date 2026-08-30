@@ -28,6 +28,7 @@ from finiq.data_scraper.core.client import (
     _validate_save_request,
     download_pages,
 )
+from finiq.data_scraper.core.constants import DISCLOSURE_GROUPS
 from finiq.data_scraper.storage.classification_store import (
     load_folder_partial_cache,
     write_company_classification_artifact,
@@ -66,7 +67,6 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
         )
 
     required_keys = {
-        "request_headers",
         "start_date",
         "end_date",
         "page_size",
@@ -74,8 +74,6 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
         "disclosure_type_groups",
         "last_report_only",
         "include_previous_disclosures",
-        "wait_seconds_between_requests",
-        "timeout",
     }
     missing_keys = sorted(required_keys.difference(snapshot))
     if missing_keys:
@@ -84,10 +82,13 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
             + ", ".join(missing_keys)
         )
 
-    request_headers = snapshot["request_headers"]
-    if not isinstance(request_headers, dict) or not all(
-        isinstance(key, str) and isinstance(value, str)
-        for key, value in request_headers.items()
+    request_headers = snapshot.get("request_headers")
+    if request_headers is not None and (
+        not isinstance(request_headers, dict)
+        or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in request_headers.items()
+        )
     ):
         raise ValueError("kind_workflow.input.json request_headers must be an object of strings")
 
@@ -159,6 +160,25 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
         raise ValueError(
             "kind_workflow.input.json disclosure_type_groups must be an object of string lists or null"
         )
+    allowed_disclosure_codes = {
+        suffix: {code for code, _name in items}
+        for suffix, _label, items in DISCLOSURE_GROUPS
+    }
+    unsupported_groups = sorted(
+        group for group in (disclosure_groups or {}) if group not in allowed_disclosure_codes
+    )
+    if unsupported_groups:
+        raise ValueError(
+            "kind_workflow.input.json contains unsupported disclosure_type_groups: "
+            + ", ".join(unsupported_groups)
+        )
+    for group, codes in (disclosure_groups or {}).items():
+        unsupported_codes = sorted(set(codes).difference(allowed_disclosure_codes[group]))
+        if unsupported_codes:
+            raise ValueError(
+                f"kind_workflow.input.json disclosure_type_groups.{group} contains unsupported codes: "
+                + ", ".join(unsupported_codes)
+            )
     for field_name in ("last_report_only", "include_previous_disclosures"):
         if snapshot[field_name] is not None and not isinstance(
             snapshot[field_name], bool
@@ -167,6 +187,8 @@ def validate_kind_workflow_input_snapshot(snapshot: object) -> dict[str, Any]:
                 f"kind_workflow.input.json {field_name} must be a boolean or null"
             )
     for field_name in ("wait_seconds_between_requests", "timeout"):
+        if field_name not in snapshot:
+            continue
         value = snapshot[field_name]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ValueError(
@@ -933,14 +955,11 @@ class KindWorkflowInput:
     parse_mode: ParseMode
 
     def to_dict(self) -> dict[str, Any]:
-        """현재 workflow 입력 상태를 JSON 친화적인 dict로 내보낸다."""
+        """결과 선택과 저장 무결성에 필요한 입력만 metadata로 내보낸다."""
         return {
             "format": KIND_WORKFLOW_INPUT_FORMAT,
-            "request_headers": dict(self.request_headers),
             "start_date": self.start_date,
             "end_date": self.end_date,
-            "start_page": self.start_page,
-            "end_page": self.end_page,
             "search_filters": list(self.search_filters),
             "disclosure_type_groups": {
                 suffix: list(codes) for suffix, codes in self.disclosure_type_groups.items()
@@ -948,9 +967,6 @@ class KindWorkflowInput:
             "last_report_only": self.last_report_only,
             "include_previous_disclosures": self.include_previous_disclosures,
             "page_size": self.page_size,
-            "wait_seconds_between_requests": self.wait_seconds_between_requests,
-            "timeout": self.timeout,
-            "parse_mode": self.parse_mode,
         }
 
 
@@ -1299,6 +1315,10 @@ class KindWorkflow:
             end_page=end_page,
             timeout=timeout,
         )
+        if not math.isfinite(timeout):
+            raise ValueError("timeout must be finite")
+        if not math.isfinite(wait_seconds_between_requests):
+            raise ValueError("wait_seconds_between_requests must be finite")
         if wait_seconds_between_requests < 0:
             raise ValueError("wait_seconds_between_requests must be >= 0")
 

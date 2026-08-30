@@ -20,6 +20,8 @@ from finiq.market_desk.web.features.disclosures.html_common import (
     _parse_progress_interval,
 )
 
+_REQUEST_METADATA = object()
+
 
 def _workspace_filter_presets(data_root: object) -> list[dict[str, Any]]:
     response = manage_filter_presets_payload(
@@ -170,6 +172,100 @@ def rebuild_invalid_disclosure_external_html_compress_payload(
     }
 
 
+def _validate_derived_compression_reuse(
+    body: dict[str, Any],
+    *,
+    input_directory: Path,
+    output_directory: Path,
+) -> dict[str, Any]:
+    workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+    mode = validate_workspace_mode(body.get("mode"))
+    parent_mode = validate_workspace_mode(body.get("parent_mode"))
+    expected_input_directory = workspace.external_owner_mode(
+        mode, parent_mode=parent_mode
+    ).resolve()
+    expected_output_directory = workspace.external_compress_owner_mode(
+        mode, parent_mode=parent_mode
+    ).resolve()
+    if input_directory != expected_input_directory:
+        raise ValueError(
+            "derived filter compression must reuse its parent-owned input directory: "
+            f"{expected_input_directory}"
+        )
+    if output_directory != expected_output_directory:
+        raise ValueError(
+            "derived filter compression must reuse its parent-owned output directory: "
+            f"{expected_output_directory}"
+        )
+
+    source_json, _source_path = _load_workspace_filtered_payload(body)
+    acpt_numbers = collect_acpt_numbers_from_json(source_json)
+    _paths, integrity = _strictly_reuse_parent_html(
+        output_directory=expected_input_directory,
+        acpt_numbers=acpt_numbers,
+        source_json=source_json,
+    )
+    compressed_path = expected_output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+    if not compressed_path.is_file():
+        raise ValueError(
+            "parent compressed external HTML does not exist: "
+            f"{compressed_path}"
+        )
+    compressed_payload = json.loads(compressed_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(compressed_payload, dict)
+        or compressed_payload.get("format")
+        != "finiq_disclosure_external_html_docs_v1"
+        or not isinstance(compressed_payload.get("records"), list)
+    ):
+        raise ValueError(
+            "parent compressed external HTML has an invalid format: "
+            f"{compressed_path}"
+        )
+    target_records: dict[str, dict[str, Any]] = {}
+    target_set = set(acpt_numbers)
+    for record in compressed_payload["records"]:
+        if not isinstance(record, dict):
+            continue
+        acpt_no = str(record.get("acpt_no") or "").strip()
+        if acpt_no not in target_set:
+            continue
+        if acpt_no in target_records:
+            raise ValueError(
+                "parent compressed external HTML has duplicate derived target: "
+                f"{acpt_no}"
+            )
+        target_records[acpt_no] = record
+    missing = [acpt_no for acpt_no in acpt_numbers if acpt_no not in target_records]
+    if missing:
+        raise ValueError(
+            "parent compressed external HTML is missing derived targets: "
+            + ", ".join(missing[:10])
+        )
+    verified_integrity = integrity["_verified_integrity_by_acpt_no"]
+    mismatched = [
+        acpt_no
+        for acpt_no, record in target_records.items()
+        if record.get("source_sha256")
+        != verified_integrity[acpt_no]["source_sha256"]
+        or record.get("source_size_bytes")
+        != verified_integrity[acpt_no]["source_size_bytes"]
+    ]
+    if mismatched:
+        raise ValueError(
+            "parent compressed external HTML is stale for derived targets: "
+            + ", ".join(mismatched[:10])
+        )
+    return {
+        "mode": mode,
+        "parent_mode": parent_mode,
+        "acpt_numbers": acpt_numbers,
+        "input_directory": expected_input_directory,
+        "output_directory": expected_output_directory,
+        "compressed_path": compressed_path,
+    }
+
+
 def inspect_disclosure_external_html_compress_payload(
     body: dict[str, Any],
 ) -> dict[str, Any]:
@@ -187,6 +283,45 @@ def inspect_disclosure_external_html_compress_payload(
     input_directory = Path(input_directory_raw).expanduser().resolve()
     output_directory = Path(output_directory_raw).expanduser().resolve()
     compressed_path = output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+    if body.get("parent_mode") not in (None, ""):
+        try:
+            derived = _validate_derived_compression_reuse(
+                body,
+                input_directory=input_directory,
+                output_directory=output_directory,
+            )
+        except Exception as exc:
+            return {
+                "format": "finiq_disclosure_external_html_compress_inspection_v1",
+                "compressed_path": str(compressed_path),
+                "passed": False,
+                "skipped": False,
+                "expected_records": 0,
+                "verified_records": 0,
+                "missing_records": 0,
+                "unexpected_records": 0,
+                "duplicate_records": 0,
+                "missing_files": [],
+                "invalid_files": [],
+                "content_matches_source": False,
+                "error": str(exc),
+            }
+        expected_records = len(derived["acpt_numbers"])
+        return {
+            "format": "finiq_disclosure_external_html_compress_inspection_v1",
+            "compressed_path": str(derived["compressed_path"]),
+            "passed": True,
+            "skipped": expected_records == 0,
+            "expected_records": expected_records,
+            "verified_records": expected_records,
+            "missing_records": 0,
+            "unexpected_records": 0,
+            "duplicate_records": 0,
+            "missing_files": [],
+            "invalid_files": [],
+            "content_matches_source": True,
+            "error": "",
+        }
     expected_acpt_numbers = (
         [
             html_path.stem
@@ -246,12 +381,17 @@ def inspect_disclosure_external_html_compress_payload(
 
     try:
         with tempfile.TemporaryDirectory(prefix="finiq-compress-inspection-") as temporary:
+            rebuild_body = {
+                "input_directory": str(input_directory),
+                "output_directory": temporary,
+                "parallel_workers": body.get("parallel_workers"),
+            }
+            metadata_payload: Any = _REQUEST_METADATA
+            if body.get("data_root") not in (None, ""):
+                metadata_payload, _metadata_path = _load_workspace_filtered_payload(body)
             compress_disclosure_external_html_payload(
-                {
-                    "input_directory": str(input_directory),
-                    "output_directory": temporary,
-                    "parallel_workers": body.get("parallel_workers"),
-                }
+                rebuild_body,
+                _metadata_payload=metadata_payload,
             )
             rebuilt_payload = json.loads(
                 (Path(temporary) / COMPRESSED_EXTERNAL_HTML_FILENAME).read_text(
@@ -274,6 +414,8 @@ def compress_disclosure_external_html_payload(
     body: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    *,
+    _metadata_payload: Any = _REQUEST_METADATA,
 ) -> dict[str, Any]:
     """Extract compact metadata from downloaded KIND external HTML files into one JSON."""
     def ensure_not_cancelled() -> None:
@@ -291,7 +433,6 @@ def compress_disclosure_external_html_payload(
         msg = "input_directory is required"
         raise ValueError(msg)
     input_directory = Path(input_directory_raw).expanduser().resolve()
-    limit = _parse_merge_limit(body.get("limit"))
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
     output_directory_raw = str(body.get("output_directory") or "").strip()
     if not output_directory_raw:
@@ -300,91 +441,22 @@ def compress_disclosure_external_html_payload(
 
     if body.get("parent_mode") not in (None, ""):
         ensure_not_cancelled()
-        workspace = resolve_disclosure_workspace(body.get("data_root") or "")
-        mode = validate_workspace_mode(body.get("mode"))
-        parent_mode = validate_workspace_mode(body.get("parent_mode"))
-        expected_input_directory = workspace.external_owner_mode(
-            mode, parent_mode=parent_mode
-        ).resolve()
-        expected_output_directory = workspace.external_compress_owner_mode(
-            mode, parent_mode=parent_mode
-        ).resolve()
-        if input_directory != expected_input_directory:
-            raise ValueError(
-                "derived filter compression must reuse its parent-owned input directory: "
-                f"{expected_input_directory}"
-            )
-        if output_directory != expected_output_directory:
-            raise ValueError(
-                "derived filter compression must reuse its parent-owned output directory: "
-                f"{expected_output_directory}"
-            )
-        source_json, _source_path = _load_workspace_filtered_payload(body)
-        acpt_numbers = collect_acpt_numbers_from_json(source_json)
-        _paths, integrity = _strictly_reuse_parent_html(
-            output_directory=expected_input_directory,
-            acpt_numbers=acpt_numbers,
-            source_json=source_json,
+        derived = _validate_derived_compression_reuse(
+            body,
+            input_directory=input_directory,
+            output_directory=output_directory,
         )
-        compressed_path = expected_output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
-        if not compressed_path.is_file():
-            raise ValueError(
-                "parent compressed external HTML does not exist: "
-                f"{compressed_path}"
-            )
-        compressed_payload = json.loads(compressed_path.read_text(encoding="utf-8"))
-        if (
-            not isinstance(compressed_payload, dict)
-            or compressed_payload.get("format")
-            != "finiq_disclosure_external_html_docs_v1"
-            or not isinstance(compressed_payload.get("records"), list)
-        ):
-            raise ValueError(
-                "parent compressed external HTML has an invalid format: "
-                f"{compressed_path}"
-            )
-        target_records: dict[str, dict[str, Any]] = {}
-        target_set = set(acpt_numbers)
-        for index, record in enumerate(compressed_payload["records"]):
-            if not isinstance(record, dict):
-                continue
-            acpt_no = str(record.get("acpt_no") or "").strip()
-            if acpt_no not in target_set:
-                continue
-            if acpt_no in target_records:
-                raise ValueError(
-                    "parent compressed external HTML has duplicate derived target: "
-                    f"{acpt_no}"
-                )
-            target_records[acpt_no] = record
-        missing = [acpt_no for acpt_no in acpt_numbers if acpt_no not in target_records]
-        if missing:
-            raise ValueError(
-                "parent compressed external HTML is missing derived targets: "
-                + ", ".join(missing[:10])
-            )
-        verified_integrity = integrity["_verified_integrity_by_acpt_no"]
-        mismatched = [
-            acpt_no
-            for acpt_no, record in target_records.items()
-            if record.get("source_sha256")
-            != verified_integrity[acpt_no]["source_sha256"]
-            or record.get("source_size_bytes")
-            != verified_integrity[acpt_no]["source_size_bytes"]
-        ]
-        if mismatched:
-            raise ValueError(
-                "parent compressed external HTML is stale for derived targets: "
-                + ", ".join(mismatched[:10])
-            )
+        mode = derived["mode"]
+        parent_mode = derived["parent_mode"]
+        acpt_numbers = derived["acpt_numbers"]
         ensure_not_cancelled()
         return {
             "format": "finiq_disclosure_external_html_compress_result_v1",
             "mode": mode,
             "parent_mode": parent_mode,
             "reused_parent_compressed_html": True,
-            "input_directory": str(expected_input_directory),
-            "output_directory": str(expected_output_directory),
+            "input_directory": str(derived["input_directory"]),
+            "output_directory": str(derived["output_directory"]),
             "summary": {
                 "found_files": len(acpt_numbers),
                 "compressed_files": len(acpt_numbers),
@@ -411,17 +483,23 @@ def compress_disclosure_external_html_payload(
             progress_callback(message)
 
     html_files = _collect_yearly_html_files(input_directory)
-    if limit is not None:
-        html_files = html_files[:limit]
     if not html_files:
         msg = "No external HTML files found in input_directory"
         raise ValueError(msg)
 
     manifest_path = input_directory / HTML_MANIFEST_FILENAME
-    manifest_payload: Any = None
-    if manifest_path.is_file():
-        manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    metadata = _collect_disclosure_metadata_from_json(manifest_payload)
+    if _metadata_payload is not _REQUEST_METADATA:
+        metadata_payload = _metadata_payload
+        metadata_source = "current filtered disclosure"
+    elif body.get("data_root") not in (None, ""):
+        metadata_payload, _metadata_path = _load_workspace_filtered_payload(body)
+        metadata_source = "current filtered disclosure"
+    else:
+        metadata_payload: Any = None
+        if manifest_path.is_file():
+            metadata_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        metadata_source = "manifest"
+    metadata = _collect_disclosure_metadata_from_json(metadata_payload)
     expected_acpt_numbers = [html_path.stem for _year, html_path in html_files]
     missing_metadata_acpt_numbers = [
         acpt_no for acpt_no in expected_acpt_numbers if acpt_no not in metadata
@@ -436,7 +514,7 @@ def compress_disclosure_external_html_payload(
     if missing_metadata_acpt_numbers:
         sample = ", ".join(missing_metadata_acpt_numbers[:10])
         raise ValueError(
-            f"manifest에서 외부 HTML {len(html_files)}건 중 "
+            f"{metadata_source}에서 외부 HTML {len(html_files)}건 중 "
             f"{len(missing_metadata_acpt_numbers)}건의 metadata를 찾지 못했습니다. "
             f"누락 접수번호 예시: {sample}"
         )

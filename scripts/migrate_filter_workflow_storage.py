@@ -10,7 +10,10 @@ from finiq.market_desk.web.features.disclosures.filter_presets import (
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Split disclosure filter results from filter.json metadata files."
+        description=(
+            "Migrate disclosure filter results to canonical sidecars, remove legacy "
+            "path and operational metadata, and refresh result fingerprints."
+        )
     )
     parser.add_argument("data_root", help="Disclosure workspace root directory")
     args = parser.parse_args()

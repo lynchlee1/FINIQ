@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import shutil
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -9,6 +14,90 @@ from typing import Any
 from finiq.data_scraper.workflow import inspect_download_directory_pages
 
 from finiq.market_desk.web.features.downloads.kind_common import *
+
+
+def _deletion_confirmation(
+    payload: dict[str, Any],
+    base: Path,
+    candidates: list[dict[str, str]],
+) -> tuple[str, list[tuple[Path, dict[str, Any]]]]:
+    validated: list[tuple[Path, dict[str, Any]]] = []
+    for candidate in candidates:
+        path = Path(candidate["path"])
+        if path.is_symlink() or not path.is_file():
+            raise ValueError(f"삭제 후보가 일반 파일이 아닙니다: {candidate['name']}")
+        resolved = path.resolve(strict=True)
+        try:
+            relative_name = resolved.relative_to(base).as_posix()
+        except ValueError as exc:
+            raise ValueError(
+                f"삭제 후보가 데이터 경로 밖에 있습니다: {candidate['name']}"
+            ) from exc
+        file_stat = resolved.stat()
+        descriptor = {
+            "name": relative_name,
+            "reason": candidate["reason"],
+            "size": file_stat.st_size,
+            "mtime_ns": file_stat.st_mtime_ns,
+        }
+        validated.append((resolved, descriptor))
+    confirmation_payload = {
+        "input_fingerprint": _download_inspection_input_fingerprint(payload),
+        "candidates": [descriptor for _path, descriptor in validated],
+    }
+    encoded = json.dumps(
+        confirmation_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest(), validated
+
+
+def _delete_candidates_as_batch(
+    base: Path,
+    validated_candidates: list[tuple[Path, dict[str, Any]]],
+) -> str | None:
+    quarantine = Path(
+        tempfile.mkdtemp(prefix=".finiq-kind-delete-", dir=base.parent)
+    )
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for source, descriptor in validated_candidates:
+            if source.is_symlink() or not source.is_file():
+                raise ValueError(f"삭제 후보가 일반 파일이 아닙니다: {descriptor['name']}")
+            current_stat = source.stat()
+            if (
+                current_stat.st_size != descriptor["size"]
+                or current_stat.st_mtime_ns != descriptor["mtime_ns"]
+            ):
+                raise ValueError(
+                    f"삭제 후보가 검사 후 변경되었습니다: {descriptor['name']}"
+                )
+            target = quarantine / descriptor["name"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+            moved.append((source, target))
+    except Exception as exc:
+        rollback_errors: list[str] = []
+        for source, target in reversed(moved):
+            try:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(target, source)
+            except Exception as rollback_exc:  # pragma: no cover - OS failure path
+                rollback_errors.append(str(rollback_exc))
+        shutil.rmtree(quarantine, ignore_errors=True)
+        detail = f"삭제 후보 격리에 실패해 원래 위치로 되돌렸습니다: {exc}"
+        if rollback_errors:
+            detail += " 되돌리기 오류: " + "; ".join(rollback_errors)
+        raise ValueError(detail) from exc
+
+    try:
+        shutil.rmtree(quarantine)
+    except OSError as exc:  # pragma: no cover - OS failure path
+        return f"격리된 삭제 파일 정리에 실패했습니다: {quarantine} ({exc})"
+    return None
+
 
 def inspect_download_output_directory_payload(
     payload: dict[str, Any],
@@ -164,6 +253,12 @@ def inspect_download_output_directory_payload(
     deletion_candidates = sorted(
         candidates_by_path.values(), key=lambda item: item["name"]
     )
+    deletion_confirmation, validated_candidates = _deletion_confirmation(
+        payload,
+        base,
+        deletion_candidates,
+    )
+    deletion_cleanup_warning: str | None = None
     if deletion_candidates and not dry_run:
         check_cancel()
         confirmed = (
@@ -174,10 +269,21 @@ def inspect_download_output_directory_payload(
         if not confirmed:
             msg = f'파일 삭제 전 "{DOWNLOAD_DELETE_CONFIRMATION_TEXT}" 입력과 삭제 허가가 필요합니다.'
             raise ValueError(msg)
+        provided_confirmation = str(
+            payload.get("deletion_confirmation") or ""
+        ).strip()
+        if provided_confirmation != deletion_confirmation:
+            raise ValueError(
+                "삭제 후보 또는 검사 입력이 직전 점검과 달라졌습니다. 다시 검사한 뒤 삭제하세요."
+            )
         log(f"삭제 예정 파일 {len(deletion_candidates)}개 삭제 중...")
-        for candidate in deletion_candidates:
-            Path(candidate["path"]).unlink(missing_ok=True)
+        deletion_cleanup_warning = _delete_candidates_as_batch(
+            base,
+            validated_candidates,
+        )
         log("파일 삭제 완료.")
+        if deletion_cleanup_warning:
+            log(deletion_cleanup_warning)
 
     log("폴더 검증 요약 데이터 구성 중...")
     statuses = [
@@ -204,6 +310,8 @@ def inspect_download_output_directory_payload(
         "deleted_count": 0 if dry_run else len(deletion_candidates),
         "deletion_candidate_count": len(deletion_candidates),
         "deletion_candidates": deletion_candidates,
+        "deletion_confirmation": deletion_confirmation,
+        "deletion_cleanup_warning": deletion_cleanup_warning,
         "deleted_files": [] if dry_run else deletion_candidates,
         "requested_count": total_pages,
         "download_statuses": statuses,

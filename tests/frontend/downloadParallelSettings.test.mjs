@@ -38,3 +38,8 @@ test("download market defaults and restores to the full market", () => {
   assert.match(page, /setMarketLabel\(saved\.market_label \|\| "전체"\)/);
   assert.doesNotMatch(page, /검색대상/);
 });
+
+test("download no longer exposes or sends partial page execution limits", () => {
+  assert.doesNotMatch(page, /시작 페이지|종료 페이지|start_page|end_page/);
+  assert.doesNotMatch(types, /start_page|end_page/);
+});

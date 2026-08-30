@@ -16,10 +16,10 @@ export function previewDownload(payload: DownloadPayload) {
   return apiPost<any>("/api/download/preview", payload);
 }
 
-export function startDownload(payload: DownloadPayload, inspectionJobId?: string) {
+export function startDownload(payload: DownloadPayload, inspectionJobId: string) {
   return apiPost<JobStartResponse>("/api/download/run/start", {
     ...payload,
-    ...(inspectionJobId ? { inspection_job_id: inspectionJobId } : {}),
+    inspection_job_id: inspectionJobId,
   });
 }
 

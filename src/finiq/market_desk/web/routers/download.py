@@ -8,7 +8,6 @@ from finiq.market_desk.web.features.downloads.kind_api import (
     build_download_options_payload,
     build_download_preview_payload,
     build_download_status_payload,
-    run_download_action,
 )
 from finiq.market_desk.web.features.downloads.kind_existing import (
     check_existing_downloads,
@@ -90,7 +89,10 @@ def create_download_router(config: Any) -> APIRouter:
 
     @router.post("/api/download/run/start")
     async def download_start_route(payload: dict[str, Any]):
-        return start_download_job(payload)
+        try:
+            return start_download_job(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/api/download/run/cancel")
     async def download_cancel_route(payload: dict[str, Any]):
@@ -105,10 +107,5 @@ def create_download_router(config: Any) -> APIRouter:
             return get_download_job(job_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
-
-    @router.post("/api/download/run")
-    async def download_run(payload: dict[str, Any]):
-        with KIND_NETWORK_JOB_LOCK:
-            return run_download_action(payload)
 
     return router

@@ -35,3 +35,11 @@ test("condition search filter Command+Backspace clears the controlled value", as
   assert.equal(nextValueAfterModifierBackspace("bond_issuance", 5, 5, false), "issuance");
   assert.equal(nextValueAfterModifierBackspace("bond issuance", 13, 13, false), "bond ");
 });
+
+test("between conditions require exactly two values before save or execution", async () => {
+  const source = await readFile(disclosureConditionCardPath, "utf8");
+
+  assert.match(source, /if \(row\.operator === "between"\)/);
+  assert.match(source, /if \(values\.length !== 2\)/);
+  assert.match(source, /between operator requires exactly two values/);
+});

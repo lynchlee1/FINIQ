@@ -56,7 +56,6 @@ def build_parse_preview_payload(body: dict[str, Any]) -> dict[str, Any]:
     )
     html_files = _collect_html_files(
         input_directory,
-        None,
         allowed_acpt_numbers=allowed_acpt_numbers,
     )
     metadata_index, _ = _load_html_parse_metadata(
@@ -184,7 +183,6 @@ def build_parse_filter_candidates_payload(body: dict[str, Any]) -> dict[str, Any
     )
     html_files = _collect_html_files(
         input_directory,
-        None,
         allowed_acpt_numbers=allowed_acpt_numbers,
     )
     metadata_index, _ = _load_html_parse_metadata(

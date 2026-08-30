@@ -490,6 +490,8 @@ def _validate_filter_blocks(blocks: object) -> list[dict[str, Any]]:
             raise ValueError(f"filter_blocks[{index}].value must be a string")
         if not value.strip() and operator not in {"exists", "empty"}:
             raise ValueError(f"filter_blocks[{index}].value is required")
+        if operator == "between" and len(_split_operator_values(value)) != 2:
+            raise ValueError("between operator requires exactly two values")
         validated.append(dict(block))
     connector_scopes: list[set[str]] = [set()]
     for index, block in enumerate(validated):
@@ -622,10 +624,10 @@ def _condition_block_matches(record: dict[str, Any], block: dict[str, Any]) -> b
         return any(text >= expected for text in nonempty_texts if expected)
     if operator == "between":
         values = _split_operator_values(expected)
-        if len(values) < 2:
-            msg = "between operator requires two values"
+        if len(values) != 2:
+            msg = "between operator requires exactly two values"
             raise ValueError(msg)
-        start, end = values[0], values[1]
+        start, end = values
         return any(start <= text <= end for text in nonempty_texts)
     if operator == "exists":
         return bool(nonempty_texts)

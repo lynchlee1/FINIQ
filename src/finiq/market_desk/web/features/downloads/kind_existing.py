@@ -29,8 +29,6 @@ def get_current_kind_total_count(input_snapshot: dict[str, Any]) -> int | None:
         from finiq.data_scraper.core.payload import build_search_form
         from finiq.data_scraper.parse import pagination_info
 
-        request_headers = input_snapshot["request_headers"]
-
         request_data = build_search_form(
             page_number=1,
             start_date=input_snapshot["start_date"],
@@ -46,7 +44,7 @@ def get_current_kind_total_count(input_snapshot: dict[str, Any]) -> int | None:
 
         response = requests.post(
             KIND_SEARCH_RESULTS_URL,
-            headers=request_headers,
+            headers=DEFAULT_REQUEST_HEADERS,
             data=request_data,
             timeout=5.0,
         )

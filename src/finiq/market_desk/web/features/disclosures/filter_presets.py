@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import hashlib
 import json
 import math
@@ -22,6 +22,10 @@ from finiq.market_desk.web.features.disclosure_workflow.layout import (
     validate_workspace_mode,
 )
 from finiq.market_desk.web.features.market_data.service_records import FilterCancelled
+from finiq.market_desk.web.features.market_data.service_common import (
+    _clean_search_text,
+    _validate_filter_blocks,
+)
 
 FILTER_WORKFLOW_FORMAT = "finiq_disclosure_filter_workflow"
 FILTER_WORKFLOW_DIRECTORY_FORMAT = "finiq_disclosure_filter_workflow_directory"
@@ -46,6 +50,21 @@ FILTER_STEP_STATUSES = {
 _WORKFLOWS_LOCK = threading.RLock()
 _ACTIVE_RUNS: dict[str, str] = {}
 _WORKFLOW_TRANSACTION_FORMAT = "finiq_disclosure_filter_workflow_transaction_v1"
+_LEGACY_OPERATIONAL_FILTER_KEYS = {
+    "filter_workers",
+    "kind_proxy_urls",
+    "log_limit",
+    "max_retries",
+    "parallel_workers",
+    "progress_interval",
+    "proxy_url",
+    "proxy_urls",
+    "report_limit",
+    "retry_count",
+    "timeout",
+    "wait_seconds",
+    "worker_count",
+}
 
 
 def _integrity_error(message: str) -> ValueError:
@@ -59,19 +78,7 @@ def _workflow_directory(data_root: object) -> Path:
 def _normalize_condition_input(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("filter workflow must be an object")
-    condition_blocks = value.get("condition_blocks")
-    if not isinstance(condition_blocks, list) or not all(
-        isinstance(block, dict) for block in condition_blocks
-    ):
-        raise ValueError("filter workflow condition_blocks must be a list of objects")
-    for index, block in enumerate(condition_blocks):
-        connector = block.get("connector")
-        if (index == 0 and connector not in {None, ""}) or (
-            index > 0 and connector not in {"AND", "OR"}
-        ):
-            raise ValueError(
-                f"filter workflow condition_blocks[{index}].connector is invalid"
-            )
+    condition_blocks = _validate_filter_blocks(value.get("condition_blocks"))
     mode = validate_workspace_mode(value.get("mode"))
     parent_value = value.get("parent_mode")
     parent_mode = (
@@ -169,14 +176,83 @@ def _filter_result_counts(payload: dict[str, Any]) -> tuple[int, int, int, int]:
     )
 
 
+def _is_persisted_path_key(value: object) -> bool:
+    key = str(value or "")
+    return key in {"path", "source_file", "source_url"} or key.endswith("_path")
+
+
+def _find_persisted_path_key(value: object, *, location: str = "result") -> str | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_location = f"{location}.{key}"
+            if _is_persisted_path_key(key):
+                return child_location
+            found = _find_persisted_path_key(child, location=child_location)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found = _find_persisted_path_key(
+                child,
+                location=f"{location}[{index}]",
+            )
+            if found is not None:
+                return found
+    return None
+
+
+def _remove_persisted_path_fields(value: object) -> None:
+    if isinstance(value, dict):
+        for key in list(value):
+            if _is_persisted_path_key(key):
+                value.pop(key, None)
+            else:
+                _remove_persisted_path_fields(value[key])
+    elif isinstance(value, list):
+        for child in value:
+            _remove_persisted_path_fields(child)
+
+
+def _has_legacy_operational_filter_settings(value: object) -> bool:
+    return isinstance(value, dict) and isinstance(value.get("filters"), dict) and bool(
+        _LEGACY_OPERATIONAL_FILTER_KEYS.intersection(value["filters"])
+    )
+
+
+def _remove_legacy_operational_filter_settings(value: object) -> None:
+    if not isinstance(value, dict) or not isinstance(value.get("filters"), dict):
+        return
+    for key in _LEGACY_OPERATIONAL_FILTER_KEYS:
+        value["filters"].pop(key, None)
+
+
+def _validate_disclosed_at(value: object, field: str) -> None:
+    disclosed_at = str(value or "").strip()
+    disclosed_date = disclosed_at[:10]
+    try:
+        parsed = date.fromisoformat(disclosed_date)
+    except ValueError as exc:
+        raise ValueError(f"{field} must begin with an ISO date") from exc
+    if parsed.isoformat() != disclosed_date:
+        raise ValueError(f"{field} must begin with an ISO date")
+
+
 def _validate_filter_result(
     payload: object,
     *,
     condition_blocks: list[dict[str, Any]],
     require_complete: bool,
+    allow_legacy_paths: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("format") != FILTER_RESULT_FORMAT:
         raise ValueError("filter workflow result has an invalid format")
+    if payload.get("source_type") != "sqlite_manifest":
+        raise ValueError("filter workflow result source_type is invalid")
+    persisted_path = _find_persisted_path_key(payload)
+    if persisted_path is not None and not allow_legacy_paths:
+        raise ValueError(
+            f"filter workflow result must not store path fields: {persisted_path}"
+        )
     source_fingerprint = str(payload.get("source_fingerprint") or "").strip()
     if (
         len(source_fingerprint) != 64
@@ -199,10 +275,54 @@ def _validate_filter_result(
         acpt_no = str(disclosure.get("acpt_no") or "").strip()
         if not acpt_no:
             raise ValueError(f"filter result disclosures[{index}].acpt_no is required")
+        _validate_disclosed_at(
+            disclosure.get("disclosed_at"),
+            f"filter result disclosures[{index}].disclosed_at",
+        )
+        company_fields = ("company_key", "company_name", "company_id")
+        if any(field not in disclosure for field in (*company_fields, "company_cell_text")):
+            raise ValueError(
+                f"filter result disclosures[{index}] company fields are required"
+            )
+        if disclosure["company_key"] is None and any(
+            disclosure[field] is not None for field in ("company_name", "company_id")
+        ):
+            raise ValueError(
+                f"filter result disclosures[{index}] unlinked company fields must be null"
+            )
         acpt_numbers.append(acpt_no)
     if len(acpt_numbers) != len(set(acpt_numbers)):
         raise _integrity_error(
             "filter workflow result contains duplicate acpt_no values"
+        )
+    transfer_acpt_numbers = payload.get("external_html_download_acpt_numbers")
+    if transfer_acpt_numbers is not None:
+        normalized_transfer = (
+            [str(value or "").strip() for value in transfer_acpt_numbers]
+            if isinstance(transfer_acpt_numbers, list)
+            else []
+        )
+        if (
+            len(normalized_transfer) != len(acpt_numbers)
+            or set(normalized_transfer) != set(acpt_numbers)
+        ):
+            raise _integrity_error(
+                "filter workflow result transfer acpt_no values do not match disclosures"
+            )
+    unique_titles = payload.get("unique_titles")
+    expected_titles = {
+        _clean_search_text(str(disclosure.get("title") or "")).strip()
+        for disclosure in disclosures
+    }
+    expected_titles.discard("")
+    if (
+        not isinstance(unique_titles, list)
+        or any(not isinstance(title, str) or not title.strip() for title in unique_titles)
+        or len(unique_titles) != len(set(unique_titles))
+        or set(unique_titles) != expected_titles
+    ):
+        raise _integrity_error(
+            "filter workflow result unique titles do not match disclosures"
         )
 
     source_disclosures, source_offset, target_disclosures, inspected_disclosures = (
@@ -212,11 +332,16 @@ def _validate_filter_result(
     returned_disclosures = _required_count(
         summary.get("returned_disclosures"), "summary.returned_disclosures"
     )
+    matched_disclosures = _required_count(
+        summary.get("matched_disclosures"), "summary.matched_disclosures"
+    )
     unique_acpt_numbers = _required_count(
         summary.get("unique_acpt_numbers"), "summary.unique_acpt_numbers"
     )
-    if returned_disclosures != len(disclosures) or unique_acpt_numbers != len(
-        disclosures
+    if (
+        matched_disclosures != len(disclosures)
+        or returned_disclosures != len(disclosures)
+        or unique_acpt_numbers != len(disclosures)
     ):
         raise _integrity_error(
             "filter workflow result counts do not match disclosures"
@@ -284,6 +409,7 @@ def _read_workflow(
     *,
     document: dict[str, Any] | None = None,
     load_results: bool = True,
+    allow_legacy_storage: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     recovered = path.name == "filter.json" and _recover_workflow_transaction(path)
     payload = _read_json_object(path) if document is None or recovered else document
@@ -352,9 +478,12 @@ def _read_workflow(
             result,
             condition_blocks=normalized["condition_blocks"],
             require_complete=True,
+            allow_legacy_paths=allow_legacy_storage,
         )
         result_fingerprint = _canonical_result_sha256(result)
         stored_fingerprint = str(payload.get("result_fingerprint") or "").strip()
+        if not stored_fingerprint and not allow_legacy_storage:
+            raise ValueError(f"filter workflow result fingerprint is missing: {path}")
         if stored_fingerprint and stored_fingerprint != result_fingerprint:
             raise ValueError(f"filter workflow result fingerprint is invalid: {path}")
         payload["result"] = result
@@ -381,9 +510,12 @@ def _read_workflow(
             pending["result"],
             condition_blocks=normalized["condition_blocks"],
             require_complete=False,
+            allow_legacy_paths=allow_legacy_storage,
         )
         pending_fingerprint = _canonical_payload_sha256(pending)
         stored_fingerprint = str(payload.get("pending_fingerprint") or "").strip()
+        if not stored_fingerprint and not allow_legacy_storage:
+            raise ValueError(f"filter workflow pending fingerprint is missing: {path}")
         if stored_fingerprint and stored_fingerprint != pending_fingerprint:
             raise ValueError(f"filter workflow pending fingerprint is invalid: {path}")
         payload["pending"] = pending
@@ -1271,6 +1403,7 @@ def manage_filter_presets_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if action == "list":
             workflows = _read_workflows(
                 directory,
+                require_workflow_format=True,
                 validate_parent_state=True,
                 load_results=False,
             )
@@ -1381,16 +1514,79 @@ def migrate_filter_workflow_storage(data_root: object) -> dict[str, Any]:
                 and "pending" not in raw
                 and raw.get("result_file") in (None, "filtered.json")
                 and raw.get("pending_file") in (None, "filter.pending.json")
+                and (
+                    raw.get("result_file") is None
+                    or bool(str(raw.get("result_fingerprint") or "").strip())
+                )
+                and (
+                    raw.get("pending_file") is None
+                    or bool(str(raw.get("pending_fingerprint") or "").strip())
+                )
                 and not (
                     raw.get("result_file") is None
                     and path.with_name("filtered.json").is_file()
                 )
             )
             if storage_is_current:
-                _read_workflow(path)
-                unchanged.append(str(path))
-                continue
-            document, _workflow = _read_workflow(path, document=raw)
+                document, _workflow = _read_workflow(
+                    path,
+                    document=raw,
+                    allow_legacy_storage=True,
+                )
+                stored_values = [document.get("result"), document.get("pending")]
+                parent_mode = document.get("parent_mode")
+                current_parent_fingerprint = (
+                    _completed_parent_fingerprint(directory.parent, parent_mode)
+                    if parent_mode is not None
+                    else None
+                )
+                needs_migration = any(
+                    _find_persisted_path_key(value) is not None
+                    or _has_legacy_operational_filter_settings(value)
+                    for value in stored_values
+                ) or (
+                    current_parent_fingerprint is not None
+                    and document.get("parent_result_fingerprint")
+                    != current_parent_fingerprint
+                )
+                if not needs_migration:
+                    _read_workflow(path)
+                    unchanged.append(str(path))
+                    continue
+            else:
+                document, _workflow = _read_workflow(
+                    path,
+                    document=raw,
+                    allow_legacy_storage=True,
+                )
+                parent_mode = document.get("parent_mode")
+                current_parent_fingerprint = (
+                    _completed_parent_fingerprint(directory.parent, parent_mode)
+                    if parent_mode is not None
+                    else None
+                )
+            result = document.get("result")
+            if isinstance(result, dict):
+                _remove_persisted_path_fields(result)
+                _remove_legacy_operational_filter_settings(result)
+                document.pop("_result_fingerprint", None)
+                document.pop("_result_file", None)
+            pending = document.get("pending")
+            if isinstance(pending, dict):
+                _remove_persisted_path_fields(pending)
+                _remove_legacy_operational_filter_settings(pending)
+                document.pop("_pending_fingerprint", None)
+                document.pop("_pending_file", None)
+            if current_parent_fingerprint is not None:
+                document["parent_result_fingerprint"] = current_parent_fingerprint
+                if isinstance(result, dict):
+                    result["parent_result_fingerprint"] = current_parent_fingerprint
+                if isinstance(pending, dict) and isinstance(
+                    pending.get("result"), dict
+                ):
+                    pending["result"][
+                        "parent_result_fingerprint"
+                    ] = current_parent_fingerprint
             _write_workflow(path, document)
             _read_workflow(path)
             migrated.append(str(path))

@@ -86,6 +86,71 @@ def test_normalize_automation_profile_rejects_last_report_only(
         normalize_automation_profile(payload)
 
 
+def test_normalize_automation_profile_uses_canonical_disclosure_type_set(
+    tmp_path: Path,
+) -> None:
+    first = _profile(tmp_path)
+    first["decisions"]["s1_search"]["disclosure_type_groups"] = {  # type: ignore[index]
+        "01": ["0172", "0161", "0161"]
+    }
+    second = json.loads(json.dumps(first))
+    second["decisions"]["s1_search"]["disclosure_type_groups"] = [  # type: ignore[index]
+        "invalid-shape"
+    ]
+
+    normalized = normalize_automation_profile(first)
+    assert normalized["decisions"]["s1_search"]["disclosure_type_groups"] == {
+        "01": ["0161", "0172"]
+    }
+    with pytest.raises(ValueError, match="disclosure_type_groups must be an object"):
+        normalize_automation_profile(second)
+
+    invalid = json.loads(json.dumps(first))
+    invalid["decisions"]["s1_search"]["disclosure_type_groups"] = {  # type: ignore[index]
+        "01": ["not-a-kind-code"]
+    }
+    with pytest.raises(ValueError, match="unsupported disclosure_type_groups.01"):
+        normalize_automation_profile(invalid)
+
+
+def test_stage_hash_ignores_operational_settings_but_keeps_page_size(
+    tmp_path: Path,
+) -> None:
+    base_payload = _profile(tmp_path)
+    changed_operations = json.loads(json.dumps(base_payload))
+    changed_operations["execution"].update(
+        {
+            "local_workers": 8,
+            "progress_interval": 100,
+            "timeout": 60,
+        }
+    )
+    changed_page_size = json.loads(json.dumps(base_payload))
+    changed_page_size["execution"]["page_size"] = 50
+    base = normalize_automation_profile(base_payload)
+
+    assert automation._stage_config_hash(
+        base, 1
+    ) == automation._stage_config_hash(
+        normalize_automation_profile(changed_operations), 1
+    )
+    assert automation._profile_semantic_hash(
+        base
+    ) == automation._profile_semantic_hash(
+        normalize_automation_profile(changed_operations)
+    )
+    assert automation._stage_config_hash(
+        base, 1
+    ) != automation._stage_config_hash(
+        normalize_automation_profile(changed_page_size), 1
+    )
+    assert automation._profile_semantic_hash(
+        base
+    ) != automation._profile_semantic_hash(
+        normalize_automation_profile(changed_page_size)
+    )
+
+
 @pytest.mark.parametrize("trigger", ["sync", "resume"])
 def test_plan_runs_selected_stages_in_order(tmp_path: Path, trigger: str) -> None:
     plan = build_automation_plan_payload({**_profile(tmp_path), "trigger": trigger})

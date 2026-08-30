@@ -321,7 +321,8 @@ def test_build_ontology_graph(tmp_path: Path):
         evidence = edge["properties"]["evidence"]
         assert "document_title" in evidence
         assert "acpt_no" in evidence
-        assert "source_file" in evidence
+        assert "source_file" not in evidence
+        assert "source_url" not in edge["properties"]
 
     # 6. Verify OntologyGraphQueryService & Collapsing minor investors
     from finiq.data.ontology_query import OntologyGraphQueryService

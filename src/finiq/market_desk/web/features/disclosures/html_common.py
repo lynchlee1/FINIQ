@@ -21,6 +21,7 @@ from finiq.config import PROJECT_ROOT
 from finiq.data_scraper.core.client import (
     KIND_DISCLOSURE_VIEWER_URL,
     VIEWER_HTML_FILENAME_TEMPLATE,
+    _has_kind_disclosure_table_fragment,
     _is_valid_html,
     download_disclosure_external_htmls,
 )
@@ -39,16 +40,24 @@ from finiq.market_desk.web.features.disclosures.external_compact import (
 
 HTML_MANIFEST_FILENAME = "kind_disclosure_html_manifest.json"
 # v1 gates reuse on a fingerprint of the whole source JSON; v2 drops that gate and
-# relies on the per-acpt_no hashes, which stay valid across filter re-runs.
+# relies on the per-acpt_no hashes, which stay valid across filter re-runs. v3 is
+# the internal-HTML format and also binds each file to its selected main document.
 HTML_MANIFEST_FORMAT_V1 = "finiq_disclosure_html_manifest_v1"
 HTML_MANIFEST_FORMAT_V2 = "finiq_disclosure_html_manifest_v2"
-HTML_MANIFEST_FORMATS = {HTML_MANIFEST_FORMAT_V1, HTML_MANIFEST_FORMAT_V2}
+HTML_MANIFEST_FORMAT_V3 = "finiq_disclosure_html_manifest_v3"
+HTML_MANIFEST_FORMATS = {
+    HTML_MANIFEST_FORMAT_V1,
+    HTML_MANIFEST_FORMAT_V2,
+    HTML_MANIFEST_FORMAT_V3,
+}
 INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT = (
     "finiq_disclosure_internal_html_source_unavailable_v1"
 )
 INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS = {
     "content_path_missing",
+    "empty_body",
 }
+UNSUPPORTED_INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS = {"invalid_html"}
 COMPRESSED_EXTERNAL_HTML_FILENAME = "compressed-external-html.json"
 HTML_DOWNLOAD_AUXILIARY_FILENAMES = {
     HTML_MANIFEST_FILENAME,
@@ -67,14 +76,27 @@ def _render_internal_html_source_unavailable_placeholder(
     doc_no: str,
     reason: str,
 ) -> bytes:
+    if not acpt_no or not doc_no or reason not in INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS:
+        raise ValueError("invalid internal HTML source-unavailable placeholder")
+    return _render_internal_html_source_unavailable_marker(
+        acpt_no=acpt_no,
+        doc_no=doc_no,
+        reason=reason,
+    )
+
+
+def _render_internal_html_source_unavailable_marker(
+    *,
+    acpt_no: str,
+    doc_no: str,
+    reason: str,
+) -> bytes:
     payload = {
         "format": INTERNAL_HTML_SOURCE_UNAVAILABLE_FORMAT,
         "acpt_no": acpt_no,
         "doc_no": doc_no,
         "reason": reason,
     }
-    if not acpt_no or not doc_no or reason not in INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS:
-        raise ValueError("invalid internal HTML source-unavailable placeholder")
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -95,8 +117,7 @@ def _internal_html_source_unavailable_placeholder(
 ) -> dict[str, str] | None:
     try:
         content = source.read_bytes() if isinstance(source, Path) else source
-        text = content.decode("utf-8")
-        lines = text.splitlines()
+        lines = content.decode("utf-8").splitlines()
         prefix = "<!-- FINIQ_SOURCE_UNAVAILABLE "
         suffix = " -->"
         if len(lines) < 2 or not lines[1].startswith(prefix) or not lines[1].endswith(suffix):
@@ -134,6 +155,33 @@ def _internal_html_source_unavailable_placeholder_file(
             f"{source_file}"
         )
     return placeholder
+
+
+def _unsupported_source_unavailable_acpt_numbers(
+    *,
+    acpt_numbers: list[str],
+    selected_doc_numbers: dict[str, str],
+    integrity_by_acpt_no: dict[str, dict[str, Any]],
+) -> list[str]:
+    unsupported: list[str] = []
+    for acpt_no in acpt_numbers:
+        doc_no = selected_doc_numbers.get(acpt_no)
+        integrity = integrity_by_acpt_no.get(acpt_no)
+        if not doc_no or integrity is None:
+            continue
+        for reason in UNSUPPORTED_INTERNAL_HTML_SOURCE_UNAVAILABLE_REASONS:
+            content = _render_internal_html_source_unavailable_marker(
+                acpt_no=acpt_no,
+                doc_no=doc_no,
+                reason=reason,
+            )
+            if (
+                integrity.get("source_sha256") == hashlib.sha256(content).hexdigest()
+                and integrity.get("source_size_bytes") == len(content)
+            ):
+                unsupported.append(acpt_no)
+                break
+    return unsupported
 
 
 def _internal_html_source_unavailable_placeholder_from_integrity(
@@ -186,6 +234,7 @@ def _html_file_validation_and_integrity(
     text_tail = ""
     normalized_prefix = ""
     has_table = False
+    has_kind_table_fragment = False
     try:
         with path.open("rb") as handle:
             while chunk := handle.read(1024 * 1024):
@@ -196,15 +245,24 @@ def _html_file_validation_and_integrity(
                 text = text_tail + decoded
                 normalized = text.lower()
                 has_table = has_table or "<table" in normalized
+                has_kind_table_fragment = (
+                    has_kind_table_fragment
+                    or _has_kind_disclosure_table_fragment(normalized)
+                )
                 if "<html" in normalized or "opendisclsviewer" in normalized:
                     valid = True
-                text_tail = text[-16:]
+                text_tail = text[-512:]
         text = text_tail + decoder.decode(b"", final=True)
         normalized = text.lower()
         has_table = has_table or "<table" in normalized
+        has_kind_table_fragment = (
+            has_kind_table_fragment
+            or _has_kind_disclosure_table_fragment(normalized)
+        )
         if "<html" in normalized or "opendisclsviewer" in normalized:
             valid = True
         valid = valid or (normalized_prefix.startswith("<p") and has_table)
+        valid = valid or has_kind_table_fragment
     except Exception:
         return False, None
     if not valid:
@@ -351,6 +409,11 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
             )
     else:
         raise ValueError(f"unsupported disclosure JSON format: {payload_format!r}")
+    manifest_only_keys = {
+        "source_sha256",
+        "source_size_bytes",
+        "source_unavailable",
+    }
     metadata: dict[str, dict[str, Any]] = {}
     for index, disclosure in enumerate(disclosures):
         if not isinstance(disclosure, dict):
@@ -360,14 +423,12 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
             raise ValueError(f"disclosures[{index}].acpt_no must not be empty")
         if acpt_no in metadata:
             raise ValueError(f"duplicate acpt_no in disclosures: {acpt_no}")
-        metadata[acpt_no] = {
-            "acpt_no": acpt_no,
-            "market": disclosure.get("market"),
-            "company_name": disclosure.get("company_name"),
-            "company_id": disclosure.get("company_id"),
-            "disclosed_at": disclosure.get("disclosed_at"),
-            "title": disclosure.get("title"),
-        }
+        preserved = dict(disclosure)
+        if payload_format in HTML_MANIFEST_FORMATS:
+            for key in manifest_only_keys:
+                preserved.pop(key, None)
+        preserved["acpt_no"] = acpt_no
+        metadata[acpt_no] = preserved
     return metadata
 
 
@@ -450,12 +511,23 @@ def _strictly_reuse_parent_html(
         collect_integrity=True,
     )
     actual_integrity = output_summary.pop("_target_integrity_by_acpt_no")
-    manifest_format, _source_fingerprint, _expected_integrity = (
+    (
+        manifest_format,
+        _source_fingerprint,
+        _expected_integrity,
+        _manifest_selected_doc_numbers,
+    ) = (
         _load_html_manifest_integrity(output_directory)
     )
-    if manifest_format != HTML_MANIFEST_FORMAT_V2:
+    required_manifest_format = (
+        HTML_MANIFEST_FORMAT_V3
+        if _selected_main_doc_numbers(source_json)
+        else HTML_MANIFEST_FORMAT_V2
+    )
+    if manifest_format != required_manifest_format:
         raise ValueError(
-            "derived filter HTML reuse requires a complete parent v2 manifest: "
+            "derived filter HTML reuse requires a complete parent "
+            f"{required_manifest_format} manifest: "
             f"{output_directory / HTML_MANIFEST_FILENAME}"
         )
     integrity_summary = _inspect_html_integrity(
@@ -468,6 +540,11 @@ def _strictly_reuse_parent_html(
         actual_integrity_by_acpt_no=actual_integrity,
     )
     selected_doc_numbers = _selected_main_doc_numbers(source_json)
+    unsupported_placeholders = _unsupported_source_unavailable_acpt_numbers(
+        acpt_numbers=output_summary["existing_target_acpt_numbers"],
+        selected_doc_numbers=selected_doc_numbers,
+        integrity_by_acpt_no=actual_integrity,
+    )
     recorded_source_unavailable = _load_html_manifest_source_unavailable(
         output_directory
     )
@@ -506,7 +583,8 @@ def _strictly_reuse_parent_html(
         recorded_source_unavailable
     )
     stale_placeholders = sorted(
-        (set(placeholders) | recorded_existing) - set(source_unavailable)
+        (set(placeholders) | recorded_existing | set(unsupported_placeholders))
+        - set(source_unavailable)
     )
     missing = list(output_summary["missing_target_acpt_numbers"])
     invalid = sorted(
@@ -541,7 +619,7 @@ def _year_from_disclosure(
     if not disclosed_at:
         raise ValueError(f"disclosed_at is required for disclosure year: {acpt_no}")
     try:
-        disclosed_date = date.fromisoformat(disclosed_at.split(" ", 1)[0])
+        disclosed_date = date.fromisoformat(disclosed_at[:10])
     except ValueError as exc:
         raise ValueError(
             f"invalid disclosed_at for disclosure year: {acpt_no} {disclosed_at!r}"
@@ -638,6 +716,7 @@ def _write_html_manifest(
     source_json: Any,
     source_integrity: dict[str, dict[str, Any]] | None = None,
     source_unavailable: dict[str, dict[str, str]] | None = None,
+    selected_main_doc_numbers: dict[str, str] | None = None,
 ) -> Path:
     metadata = _collect_disclosure_metadata_from_json(source_json)
     unavailable = source_unavailable or {}
@@ -666,9 +745,29 @@ def _write_html_manifest(
                 "Missing HTML integrity for acpt_no values: "
                 + ", ".join(missing_integrity[:10])
             )
+    if selected_main_doc_numbers is not None:
+        missing_doc_numbers = [
+            acpt_no
+            for acpt_no in manifest_acpt_numbers
+            if not str(selected_main_doc_numbers.get(acpt_no) or "").strip()
+        ]
+        if missing_doc_numbers:
+            raise ValueError(
+                "Missing selected_main_doc_no for acpt_no values: "
+                + ", ".join(missing_doc_numbers[:10])
+            )
     disclosures = [
         {
             **metadata[acpt_no],
+            **(
+                {
+                    "selected_main_doc_no": str(
+                        selected_main_doc_numbers[acpt_no]
+                    ).strip()
+                }
+                if selected_main_doc_numbers is not None
+                else {}
+            ),
             **(source_integrity[acpt_no] if source_integrity is not None else {}),
             **(
                 {"source_unavailable": unavailable[acpt_no]}
@@ -682,7 +781,11 @@ def _write_html_manifest(
     atomic_write_json(
         manifest_path,
         {
-            "format": HTML_MANIFEST_FORMAT_V2,
+            "format": (
+                HTML_MANIFEST_FORMAT_V3
+                if selected_main_doc_numbers is not None
+                else HTML_MANIFEST_FORMAT_V2
+            ),
             "disclosures": disclosures,
         },
     )
@@ -763,10 +866,15 @@ def _source_json_fingerprint(source_json: Any) -> str:
 
 def _load_html_manifest_integrity(
     output_directory: Path,
-) -> tuple[str, str, dict[str, dict[str, Any]]]:
+) -> tuple[
+    str,
+    str,
+    dict[str, dict[str, Any]],
+    dict[str, str],
+]:
     manifest_path = output_directory / HTML_MANIFEST_FILENAME
     if not manifest_path.is_file():
-        return "", "", {}
+        return "", "", {}, {}
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or payload.get("format") not in HTML_MANIFEST_FORMATS:
         raise ValueError(f"invalid HTML manifest format: {manifest_path}")
@@ -776,6 +884,7 @@ def _load_html_manifest_integrity(
         raise ValueError(f"HTML manifest disclosures must be a list: {manifest_path}")
 
     integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
+    selected_doc_numbers: dict[str, str] = {}
     seen: set[str] = set()
     for index, disclosure in enumerate(disclosures):
         if not isinstance(disclosure, dict):
@@ -788,6 +897,16 @@ def _load_html_manifest_integrity(
         if acpt_no in seen:
             raise ValueError(f"duplicate acpt_no in HTML manifest: {acpt_no}")
         seen.add(acpt_no)
+        selected_main_doc_no = str(
+            disclosure.get("selected_main_doc_no") or ""
+        ).strip()
+        if manifest_format == HTML_MANIFEST_FORMAT_V3:
+            if not selected_main_doc_no:
+                raise ValueError(
+                    "HTML manifest selected_main_doc_no must not be empty: "
+                    f"{acpt_no}"
+                )
+            selected_doc_numbers[acpt_no] = selected_main_doc_no
         sha256 = str(disclosure.get("source_sha256") or "").strip().lower()
         size = disclosure.get("source_size_bytes")
         if not sha256 and size in (None, ""):
@@ -808,6 +927,7 @@ def _load_html_manifest_integrity(
         manifest_format,
         str(payload.get("source_fingerprint") or ""),
         integrity_by_acpt_no,
+        selected_doc_numbers,
     )
 
 
@@ -819,15 +939,28 @@ def _inspect_html_integrity(
     structurally_valid_acpt_numbers: list[str],
     actual_integrity_by_acpt_no: dict[str, dict[str, Any]],
     loaded_manifest_integrity: (
-        tuple[str, str, dict[str, dict[str, Any]]] | None
+        tuple[
+            str,
+            str,
+            dict[str, dict[str, Any]],
+            dict[str, str],
+        ]
+        | None
     ) = None,
 ) -> dict[str, Any]:
-    manifest_format, manifest_source_fingerprint, expected_integrity = (
+    (
+        manifest_format,
+        manifest_source_fingerprint,
+        expected_integrity,
+        manifest_selected_doc_numbers,
+    ) = (
         loaded_manifest_integrity
         if loaded_manifest_integrity is not None
         else _load_html_manifest_integrity(output_directory)
     )
-    if manifest_format == HTML_MANIFEST_FORMAT_V2:
+    source_selected_doc_numbers = _selected_main_doc_numbers(source_json)
+    is_internal_source = bool(source_selected_doc_numbers)
+    if manifest_format in {HTML_MANIFEST_FORMAT_V2, HTML_MANIFEST_FORMAT_V3}:
         # Per-acpt_no hashes are keyed by receipt number, so they survive filter
         # re-runs that only change the target list. No whole-payload gate needed.
         source_matches = True
@@ -843,6 +976,13 @@ def _inspect_html_integrity(
     hash_mismatch_acpt_numbers: list[str] = []
     for acpt_no in acpt_numbers:
         if acpt_no not in structurally_valid:
+            continue
+        if is_internal_source and (
+            manifest_format != HTML_MANIFEST_FORMAT_V3
+            or manifest_selected_doc_numbers.get(acpt_no)
+            != source_selected_doc_numbers.get(acpt_no)
+        ):
+            unverified_acpt_numbers.append(acpt_no)
             continue
         if not source_matches or acpt_no not in expected_integrity:
             unverified_acpt_numbers.append(acpt_no)
@@ -1261,36 +1401,6 @@ def _is_delete_confirmed(body: dict[str, Any]) -> bool:
         and str(body.get("delete_confirmation_text") or "").strip()
         == HTML_DELETE_CONFIRMATION_TEXT
     )
-
-
-def _apply_limit_to_acpt_numbers(acpt_numbers: list[str], limit: Any) -> list[str]:
-    if limit in (None, ""):
-        return acpt_numbers
-    parsed_limit = int(limit)
-    if parsed_limit < 1:
-        msg = "limit must be >= 1"
-        raise ValueError(msg)
-    return acpt_numbers[:parsed_limit]
-
-
-def _apply_limit_to_targets(
-    targets: list[dict[str, str]], limit: Any
-) -> list[dict[str, str]]:
-    limited_acpt_numbers = _apply_limit_to_acpt_numbers(
-        [target["acpt_no"] for target in targets],
-        limit,
-    )
-    return targets[: len(limited_acpt_numbers)]
-
-
-def _parse_merge_limit(value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    parsed = int(value)
-    if parsed < 1:
-        msg = "limit must be >= 1"
-        raise ValueError(msg)
-    return parsed
 
 
 def _collect_yearly_html_files(input_directory: Path) -> list[tuple[str, Path]]:

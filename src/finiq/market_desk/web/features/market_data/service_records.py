@@ -107,6 +107,8 @@ def _public_disclosure_record(record: dict[str, Any]) -> dict[str, Any]:
         key: value
         for key, value in record.items()
         if not str(key).startswith("__filter_")
+        and str(key) not in {"path", "source_file", "source_url"}
+        and not str(key).endswith("_path")
     }
 
 

@@ -658,20 +658,24 @@ def _summary(rows: list[TripleBarrierResult], storage_counts: dict[str, int]) ->
 
 
 def _resolve_manifest(path: str | Path | None) -> tuple[Path, dict[str, Any]]:
-    manifest_path = Path(path).expanduser().resolve() if path else DEFAULT_KIND_MANIFEST_PATH
-    return manifest_path, json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_path = (
+        Path(path).expanduser().resolve() if path else DEFAULT_KIND_MANIFEST_PATH
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("format") != "finiq_disclosure_table_manifest_v1":
+        raise ValueError(f"Not a FINIQ disclosure SQLite manifest: {manifest_path}")
+    if manifest.get("schema_version") != 4:
+        raise ValueError(
+            f"KIND SQLite manifest schema_version must be 4: {manifest_path}"
+        )
+    return manifest_path, manifest
 
 
 def _resolve_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Path:
-    raw_path = str(shard.get("path") or "").strip()
-    if raw_path:
-        path = Path(raw_path)
-        if path.is_absolute() and path.exists():
-            return path
-    relative_path = str(shard.get("relative_path") or "").strip()
-    if relative_path:
-        return (manifest_path.parent / relative_path).resolve()
-    return (manifest_path.parent / f"{shard.get('year')}.sqlite").resolve()
+    year = str(shard.get("year") or "").strip()
+    if len(year) != 4 or not year.isdigit():
+        raise ValueError("KIND SQLite manifest shard.year must be a four-digit year")
+    return (manifest_path.parent / f"{year}.sqlite").resolve()
 
 
 def _load_disclosures_for_triple_barrier(

@@ -80,6 +80,28 @@ def _graph_output_path(data_root: Path) -> Path:
     return data_root / GRAPH_OUTPUT_DIRECTORY / GRAPH_OUTPUT_FILENAME
 
 
+def _persisted_graph_path_key(value: object, *, location: str = "graph") -> str | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_location = f"{location}.{key}"
+            if str(key) in {"path", "source_file", "source_url"} or str(key).endswith(
+                "_path"
+            ):
+                return child_location
+            found = _persisted_graph_path_key(child, location=child_location)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found = _persisted_graph_path_key(
+                child,
+                location=f"{location}[{index}]",
+            )
+            if found is not None:
+                return found
+    return None
+
+
 def build_disclosure_graph_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Build and atomically save the stage 09 graph document."""
     data_root = _workspace_root(body)
@@ -130,4 +152,10 @@ def load_disclosure_graph_payload(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("공시 관계 그래프의 nodes와 edges는 배열이어야 합니다.")
     if not isinstance(payload.get("metadata"), dict):
         raise ValueError("공시 관계 그래프의 metadata는 객체여야 합니다.")
+    persisted_path = _persisted_graph_path_key(payload)
+    if persisted_path is not None:
+        raise ValueError(
+            "구형 공시 관계 그래프에 경로 metadata가 남아 있습니다. "
+            f"09단계 그래프만 다시 생성하세요: {persisted_path}"
+        )
     return payload

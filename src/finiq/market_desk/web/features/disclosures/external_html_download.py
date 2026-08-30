@@ -138,7 +138,6 @@ def download_disclosure_external_html_payload(
         msg = "No acpt_no values found in JSON"
         raise ValueError(msg)
 
-    acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
 
     if parent_mode_raw not in (None, ""):

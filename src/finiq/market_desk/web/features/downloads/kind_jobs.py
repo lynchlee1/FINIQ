@@ -52,35 +52,58 @@ def _append_job_progress(job_id: str, message: str) -> None:
 def start_download_job(payload: dict[str, Any]) -> dict[str, Any]:
     payload = apply_workspace_defaults("kind_download", payload)
     inspection_job_id = str(payload.pop("inspection_job_id", "") or "").strip()
+    if not inspection_job_id:
+        raise ValueError("inspection_job_id is required")
+    input_fingerprint = _download_inspection_input_fingerprint(payload)
     job_id = uuid.uuid4().hex
-    job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
+    job = DownloadJob(
+        id=job_id,
+        input_fingerprint=input_fingerprint,
+        progress_log=deque(maxlen=_as_log_limit(payload)),
+    )
     with _DOWNLOAD_JOBS_LOCK:
         _purge_expired_download_jobs_locked()
-        if inspection_job_id:
-            inspection_job = _DOWNLOAD_JOBS.get(inspection_job_id)
-            if (
-                inspection_job is None
-                or inspection_job.status != "completed"
-                or inspection_job.result is None
-                or inspection_job.result.get("format") != "kind_download_folder_cleanup_v1"
-            ):
-                raise ValueError(
-                    f"completed inspection job not found: {inspection_job_id}"
-                )
-            existing_job_id = str(
-                inspection_job.result.get("download_job_id") or ""
-            ).strip()
-            if existing_job_id:
-                existing_job = _DOWNLOAD_JOBS.get(existing_job_id)
-                if existing_job is None:
-                    raise ValueError(
-                        f"download job not found: {existing_job_id}"
-                    )
-                return _job_snapshot(existing_job)
+        inspection_job = _DOWNLOAD_JOBS.get(inspection_job_id)
+        if (
+            inspection_job is None
+            or inspection_job.status != "completed"
+            or inspection_job.result is None
+            or inspection_job.result.get("format") != "kind_download_folder_cleanup_v1"
+        ):
+            raise ValueError(
+                f"completed inspection job not found: {inspection_job_id}"
+            )
+        if inspection_job.input_fingerprint != input_fingerprint:
+            raise ValueError(
+                "검사에 사용한 입력과 다운로드 입력이 다릅니다. 현재 조건으로 다시 검사하세요."
+            )
+        inspection_result = inspection_job.result
+        unresolved_candidates = (
+            inspection_result.get("dry_run") is True
+            and int(inspection_result.get("deletion_candidate_count") or 0) > 0
+        )
+        verified = inspection_result.get("existing_downloads")
+        verification_failed = not isinstance(verified, dict) or any(
+            item.get("status") != "validated"
+            or item.get("filters_match") is False
+            or item.get("metadata_status") == "mismatch"
+            for item in verified.get("ranges", [])
+        )
+        if unresolved_candidates or verification_failed:
+            raise ValueError(
+                "검사에서 해결되지 않은 파일 또는 검증 실패가 발견되었습니다."
+            )
+        existing_job_id = str(
+            inspection_result.get("download_job_id") or ""
+        ).strip()
+        if existing_job_id:
+            existing_job = _DOWNLOAD_JOBS.get(existing_job_id)
+            if existing_job is None:
+                raise ValueError(f"download job not found: {existing_job_id}")
+            return _job_snapshot(existing_job)
         _DOWNLOAD_JOBS[job_id] = job
         _CANCELLED_DOWNLOAD_JOBS.discard(job_id)
-        if inspection_job_id:
-            inspection_job.result["download_job_id"] = job_id
+        inspection_result["download_job_id"] = job_id
 
     def _worker() -> None:
         acquired = False
@@ -177,7 +200,11 @@ def start_inspect_folder_job(payload: dict[str, Any]) -> dict[str, Any]:
         job_id = uuid.UUID(requested_job_id).hex if requested_job_id else uuid.uuid4().hex
     except ValueError as exc:
         raise ValueError("job_id must be a UUID") from exc
-    job = DownloadJob(id=job_id, progress_log=deque(maxlen=_as_log_limit(payload)))
+    job = DownloadJob(
+        id=job_id,
+        input_fingerprint=_download_inspection_input_fingerprint(payload),
+        progress_log=deque(maxlen=_as_log_limit(payload)),
+    )
     with _DOWNLOAD_JOBS_LOCK:
         _purge_expired_download_jobs_locked()
         if job_id in _DOWNLOAD_JOBS:

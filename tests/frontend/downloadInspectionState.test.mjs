@@ -30,3 +30,11 @@ test("applying saved settings preserves metadata inspection and invalidates only
   assert.match(source, /existingData\.saved_filters_consistent\s*&& areFiltersMatching\(currentFilters, existingData\.saved_filters\)/);
   assert.match(source, /const hasCompletedMetadata = currentMetadataKey === lastInspectedMetadataKey/);
 });
+
+test("deletion sends the confirmation produced by the matching inspection", async () => {
+  const source = await readFile(downloadPagePath, "utf8");
+
+  assert.match(source, /cleanupDeletionConfirmationRef\.current = String\(data\.deletion_confirmation/);
+  assert.match(source, /deletion_confirmation: cleanupDeletionConfirmationRef\.current/);
+  assert.match(source, /!cleanupDeletionConfirmationRef\.current \|\| cleanupCandidateKey !== currentKey/);
+});

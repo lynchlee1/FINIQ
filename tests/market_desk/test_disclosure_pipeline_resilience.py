@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from finiq.market_desk.web.features.disclosures.html_common import (
+    _render_internal_html_source_unavailable_marker,
     _source_json_fingerprint,
 )
 from finiq.market_desk.web.features.disclosures.html_cleanup import (
@@ -460,7 +461,6 @@ def test_derived_preview_selects_child_membership_before_scan(tmp_path: Path) ->
     )
     html_files = _collect_html_files(
         input_directory,
-        None,
         allowed_acpt_numbers=allowed_acpt_numbers,
     )
 
@@ -1017,6 +1017,86 @@ def test_internal_html_hash_mismatch_redownloads_only_changed_file(
     assert verified["hash_mismatch_target_html_count"] == 0
 
 
+def test_internal_html_inspection_rejects_legacy_invalid_html_placeholder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    acpt_no = "20250101000001"
+    doc_no = f"{acpt_no}99"
+    body = _internal_html_body(tmp_path, [acpt_no])
+    output_directory = Path(str(body["output_directory"]))
+    target = output_directory / "2025" / f"{acpt_no}.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(_valid_html(), encoding="utf-8")
+    baseline = create_internal_html_integrity_baseline_payload(
+        {**body, "trust_existing_files": True}
+    )
+
+    legacy_placeholder = _render_internal_html_source_unavailable_marker(
+        acpt_no=acpt_no,
+        doc_no=doc_no,
+        reason="invalid_html",
+    )
+    target.write_bytes(legacy_placeholder)
+    manifest_path = Path(str(baseline["manifest_path"]))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["disclosures"][0].update(
+        {
+            "source_sha256": hashlib.sha256(legacy_placeholder).hexdigest(),
+            "source_size_bytes": len(legacy_placeholder),
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    inspection = check_disclosure_html_output_directory_payload(body)
+
+    assert inspection["invalid_target_acpt_numbers"] == [acpt_no]
+    assert inspection["download_required_target_html_count"] == 1
+    assert inspection["hash_mismatch_target_html_count"] == 0
+
+    replacement = _valid_html("replacement").encode()
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *_args, **_kwargs: replacement,
+    )
+    result = download_disclosure_internal_html_payload(
+        {**body, "max_requests_per_minute": 100}
+    )
+
+    assert target.read_bytes() == replacement
+    assert result["source_unavailable_count"] == 0
+
+    target.write_bytes(legacy_placeholder)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["disclosures"][0].update(
+        {
+            "source_sha256": hashlib.sha256(legacy_placeholder).hexdigest(),
+            "source_size_bytes": len(legacy_placeholder),
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    def empty_body(*_args: object, **_kwargs: object) -> bytes:
+        from finiq.market_desk.web.features.disclosures import internal_html_download
+
+        raise internal_html_download._EmptyBodyError("empty body")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        empty_body,
+    )
+    empty_result = download_disclosure_internal_html_payload(
+        {**body, "max_requests_per_minute": 100}
+    )
+
+    saved_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert empty_result["source_unavailable_count"] == 1
+    assert saved_manifest["disclosures"][0]["source_unavailable"] == {
+        "doc_no": doc_no,
+        "reason": "empty_body",
+    }
+
+
 @pytest.mark.parametrize("source_type", ["external", "internal"])
 def test_existing_html_structure_and_hash_share_one_file_read(
     tmp_path: Path,
@@ -1214,6 +1294,27 @@ def test_internal_html_download_accepts_legacy_html_fragment(
     assert [path.name for path in saved] == ["19970415M00003.html"]
 
 
+def test_internal_html_download_accepts_kind_table_fragment_with_broken_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        lambda *args, **kwargs: (
+            b"IGHT'>&gt;2016"
+            b'<TABLE class="TABLE"><TR><TD class="TD">content</TD></TR></TABLE>'
+        ),
+    )
+
+    saved = download_disclosure_internal_htmls(
+        output_directory=tmp_path,
+        request_headers={},
+        targets=[{"acpt_no": "20160330002146", "doc_no": "20160330007821"}],
+        max_requests_per_minute=100,
+    )
+
+    assert [path.name for path in saved] == ["20160330002146.html"]
+
+
 def test_internal_html_integrity_baseline_accepts_legacy_html_fragment(
     tmp_path: Path,
 ) -> None:
@@ -1225,6 +1326,29 @@ def test_internal_html_integrity_baseline_accepts_legacy_html_fragment(
     target.write_bytes(
         b'<P class="section-1">Legacy disclosure</P>'
         b"<TABLE><TR><TD>content</TD></TR></TABLE>"
+    )
+
+    result = create_internal_html_integrity_baseline_payload(
+        {**body, "trust_existing_files": True}
+    )
+
+    assert result["hashed_count"] == 1
+    inspection = check_disclosure_html_output_directory_payload(body)
+    assert inspection["hash_verified_target_html_count"] == 1
+    assert inspection["invalid_target_html_count"] == 0
+
+
+def test_internal_html_integrity_accepts_kind_table_fragment_with_broken_prefix(
+    tmp_path: Path,
+) -> None:
+    acpt_no = "20160330002146"
+    body = _internal_html_body(tmp_path, [acpt_no])
+    output_directory = Path(str(body["output_directory"]))
+    target = output_directory / "2025" / f"{acpt_no}.html"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(
+        b"IGHT'>&gt;2016"
+        b'<TABLE class="TABLE"><TR><TD class="TD">content</TD></TR></TABLE>'
     )
 
     result = create_internal_html_integrity_baseline_payload(

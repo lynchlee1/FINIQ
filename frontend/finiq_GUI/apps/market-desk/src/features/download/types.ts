@@ -33,8 +33,6 @@ export type DownloadPayload = {
   worker_count: number;
   parallel_strategy: "years" | "pages";
   log_limit: number;
-  start_page: number;
-  end_page: number | null;
   last_report_only: boolean;
   disclosure_type_groups: Record<string, string[]>;
 };
@@ -44,6 +42,7 @@ export type DownloadInspectPayload = DownloadPayload & {
   dry_run: boolean;
   delete_confirmed: boolean;
   delete_confirmation_text: string;
+  deletion_confirmation?: string;
 };
 
 export type DownloadSavedFilters = Pick<

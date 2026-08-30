@@ -73,7 +73,7 @@ export default function HtmlSectionSplitPage() {
   const [loading, setLoading] = useState(true);
   const [inputDirectory, setInputDirectory] = useState("");
   const [outputDirectory, setOutputDirectory] = useState("");
-  const [limit, setLimit] = useState("20");
+  const [pageSize, setPageSize] = useState("20");
   const [reportLimit, setReportLimit] = useState("50");
   const [progressInterval, setProgressInterval] = useState("25");
   const [workers, setWorkers] = useState("1");
@@ -369,12 +369,12 @@ export default function HtmlSectionSplitPage() {
 
   const splitOptionFields: HtmlWorkflowField[] = [
     {
-      id: "limit",
+      id: "pageSize",
       kind: "input",
       type: "number",
       label: "최대 표시 파일 수",
-      value: limit,
-      onChange: setLimit,
+      value: pageSize,
+      onChange: setPageSize,
       span: 2,
     },
     {
@@ -433,7 +433,7 @@ export default function HtmlSectionSplitPage() {
     inspectAbortControllerRef.current = abortController;
     setIsInspecting(true);
     try {
-      const configuredPageSize = Number(limit);
+      const configuredPageSize = Number(pageSize);
       if (!Number.isInteger(configuredPageSize) || configuredPageSize < 1) {
         throw new Error("page_size must be a positive integer");
       }

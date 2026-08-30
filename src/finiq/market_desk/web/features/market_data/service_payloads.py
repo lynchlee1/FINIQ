@@ -125,8 +125,6 @@ def filter_disclosures_payload(
     end_date = str(body.get("end_date") or "").strip()
     restrict_acpt_numbers = bool(body.get("restrict_acpt_numbers"))
     acpt_numbers = _normalize_acpt_numbers(body.get("acpt_numbers"))
-    limit = None
-    limit_unlimited = True
     include_external_html_download_acpt_numbers = bool(
         body.get("include_external_html_download_acpt_numbers")
     )
@@ -210,10 +208,6 @@ def filter_disclosures_payload(
         "start_date": start_date,
         "end_date": end_date,
         "acpt_numbers": sorted(acpt_numbers),
-        "limit": limit,
-        "limit_unlimited": limit_unlimited,
-        "return_limit": None,
-        "filter_workers": filter_workers,
     }
     filtered: list[dict[str, Any]] = []
     external_html_download_acpt_heap: list[tuple[tuple[str, str, str], int, str]] = []
@@ -389,7 +383,6 @@ def search_disclosure_titles_payload(
         "source_sqlite_manifest_path": str(sqlite_manifest_path),
         "filters": {
             "filter_blocks": filter_blocks,
-            "filter_workers": filter_workers,
         },
         "summary": {
             "source_disclosures": source_disclosures,

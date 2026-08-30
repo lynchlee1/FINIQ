@@ -20,6 +20,7 @@ from finiq.data_scraper.core.client import (
 )
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
 from finiq.data_scraper.parse import disclosure_rows, pagination_info
+from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.data_scraper.workflow import (
     KindWorkflow,
     KindWorkflowCheckpoint,
@@ -58,8 +59,6 @@ def _validate_staged_download_input(
     start_date: str,
     end_date: str,
     page_size: int,
-    wait_seconds: float,
-    timeout: float,
 ) -> None:
     saved_input = checkpoint["input"]
     saved_filters = _snapshot_filters_payload(saved_input)
@@ -68,13 +67,10 @@ def _validate_staged_download_input(
         requested_filters.get("last_report_only")
     )
     matches = (
-        saved_input.get("request_headers") == DEFAULT_REQUEST_HEADERS
-        and saved_input.get("start_date") == start_date
+        saved_input.get("start_date") == start_date
         and saved_input.get("end_date") == end_date
         and saved_input.get("page_size") == page_size
         and saved_input.get("include_previous_disclosures") is None
-        and saved_input.get("wait_seconds_between_requests") == wait_seconds
-        and saved_input.get("timeout") == timeout
         and saved_filters == requested_filters
     )
     if not matches:
@@ -82,6 +78,71 @@ def _validate_staged_download_input(
             "중단된 KIND 임시 다운로드의 입력이 현재 요청과 다릅니다. "
             "기존 임시 다운로드를 정리한 뒤 다시 실행하세요."
         )
+
+
+def _resume_staged_download_pages(
+    staging_directory: Path,
+    checkpoint_payload: dict[str, Any],
+    *,
+    page_size: int,
+) -> tuple[list[Path], int, int]:
+    page_paths = sorted_result_page_paths(staging_directory)
+    checkpoint_pages = sorted(
+        Path(name).name
+        for name in checkpoint_payload.get("saved_files") or []
+        if "_post_page_" in Path(name).name
+    )
+    actual_pages = [path.name for path in page_paths]
+    if checkpoint_pages != actual_pages:
+        raise ValueError(
+            "중단된 KIND 임시 다운로드의 checkpoint와 저장 페이지가 다릅니다."
+        )
+
+    total_pages_values: set[int] = set()
+    total_items_values: set[int] = set()
+    saved_page_numbers: set[int] = set()
+    for page_path in page_paths:
+        page_info = validate_downloaded_result_page(
+            page_path,
+            expected_page_size=page_size,
+        )
+        filename_page = result_page_number(page_path)
+        current_page = int(page_info["current_page"])
+        if current_page != filename_page:
+            raise ValueError(
+                "중단된 KIND 임시 다운로드의 파일명 페이지와 본문 페이지가 다릅니다: "
+                f"{page_path.name}"
+            )
+        if current_page in saved_page_numbers:
+            raise ValueError(
+                f"중단된 KIND 임시 다운로드에 중복 페이지 {current_page}가 있습니다."
+            )
+        saved_page_numbers.add(current_page)
+        total_pages_values.add(int(page_info["total_pages"]))
+        total_items_values.add(int(page_info["total_items"]))
+
+    if len(total_pages_values) != 1 or len(total_items_values) != 1:
+        raise ValueError(
+            "중단된 KIND 임시 다운로드 페이지들의 전체 페이지 수 또는 전체 건수가 다릅니다."
+        )
+    total_pages = next(iter(total_pages_values))
+    if any(page_number > total_pages for page_number in saved_page_numbers):
+        raise ValueError("중단된 KIND 임시 다운로드에 전체 페이지 범위를 넘는 페이지가 있습니다.")
+
+    first_missing_page = next(
+        (
+            page_number
+            for page_number in range(1, total_pages + 1)
+            if page_number not in saved_page_numbers
+        ),
+        total_pages + 1,
+    )
+    for page_path in page_paths:
+        if result_page_number(page_path) >= first_missing_page:
+            page_path.unlink()
+    retained_paths = sorted_result_page_paths(staging_directory)
+    downloaded_pages = first_missing_page - 1
+    return retained_paths, downloaded_pages, total_pages
 
 
 def _configure_full_download_workflow(
@@ -219,29 +280,12 @@ def _run_auto_download_staged(
             start_date=start_date,
             end_date=end_date,
             page_size=page_size,
-            wait_seconds=wait_seconds,
-            timeout=timeout,
         )
-        inspected = inspect_download_directory_pages(
+        page_paths, downloaded_pages, total_pages = _resume_staged_download_pages(
             staging_directory,
-            expected_page_size=page_size,
-            require_complete=False,
+            checkpoint_payload,
+            page_size=page_size,
         )
-        downloaded_pages = int(inspected["downloaded_pages"])
-        checkpoint_pages = sorted(
-            Path(name).name
-            for name in checkpoint_payload.get("saved_files") or []
-            if "_post_page_" in Path(name).name
-        )
-        actual_pages = [path.name for path in page_paths]
-        if (
-            checkpoint_payload.get("last_saved_page") != downloaded_pages
-            or checkpoint_pages != actual_pages
-        ):
-            raise ValueError(
-                "중단된 KIND 임시 다운로드의 checkpoint와 저장 페이지가 다릅니다."
-            )
-        total_pages = int(inspected["total_pages"])
     else:
         probe = _configure_full_download_workflow(
             output_directory=staging_directory,
@@ -290,8 +334,10 @@ def _run_auto_download_staged(
         ],
         last_saved_file=page_paths[-1].name if page_paths else None,
         last_saved_page=downloaded_pages,
-        last_request_data=list(
-            full_workflow.build_request_data(page_number=downloaded_pages)
+        last_request_data=(
+            list(full_workflow.build_request_data(page_number=downloaded_pages))
+            if downloaded_pages
+            else []
         ),
         completed=False,
     )
@@ -408,7 +454,6 @@ def _download_payload_summary(payload: dict[str, Any]) -> list[str]:
         f"mode={mode}",
         f"output={str(payload.get('output_directory') or '').strip()}",
         f"range={str(payload.get('start_date') or '').strip()}~{str(payload.get('end_date') or '').strip()}",
-        f"pages={payload.get('start_page') or 1}~{payload.get('end_page') or 'auto'}",
         f"page_size={payload.get('page_size') or 100}",
         f"wait={payload.get('wait_seconds') or 1}s",
         f"timeout={payload.get('timeout') or 20}s",
@@ -507,11 +552,10 @@ def _run_single(
     _parse_iso_date(start_date_raw, "start_date")
     _parse_iso_date(end_date_raw, "end_date")
 
-    start_page = _as_int(payload, "start_page", 1)
-    end_page = payload.get("end_page")
-    end_page_value = (
-        _as_int(payload, "end_page", start_page) if end_page not in ("", None) else None
-    )
+    if _as_int(payload, "start_page", 1) != 1 or payload.get("end_page") not in ("", None):
+        raise ValueError(
+            "페이지 범위 제한은 더 이상 지원하지 않습니다. 종료 페이지를 비우고 전체 결과를 받으세요."
+        )
     page_size = _as_int(payload, "page_size", 100)
     wait_seconds = _as_float(payload, "wait_seconds", 1.0)
     timeout = _as_float(payload, "timeout", 20.0)
@@ -522,7 +566,6 @@ def _run_single(
     if timeout <= 0:
         raise ValueError("timeout must be > 0")
 
-    workflow = KindWorkflow()
     progress_log, local_progress_callback = _build_progress_collector(
         external_callback=progress_callback
     )
@@ -540,62 +583,32 @@ def _run_single(
         progress_callback,
     )
 
-    cleanup_warnings: list[str] = []
-    if end_page_value is not None:
+    _append_progress(
+        progress_log,
+        "SINGLE auto_page_download first_page_probe=1",
+        progress_callback,
+    )
+    cleanup_warnings = _run_auto_download_staged(
+        output_directory=output_directory,
+        payload=payload,
+        start_date=start_date_raw,
+        end_date=end_date_raw,
+        page_size=page_size,
+        search_filters=search_filters,
+        disclosure_type_groups=disclosure_type_groups,
+        last_report_only=last_report_only,
+        wait_seconds=wait_seconds,
+        timeout=timeout,
+        progress_callback=local_progress_callback,
+        cancel_check=cancel_check,
+        page_worker_count=page_worker_count,
+    )
+    for warning in cleanup_warnings:
         _append_progress(
             progress_log,
-            f"SINGLE fixed_page_download start_page={start_page} end_page={end_page_value}",
+            f"CLEANUP warning {warning}",
             progress_callback,
         )
-        workflow.run(
-            output_directory=output_directory,
-            request_headers=DEFAULT_REQUEST_HEADERS,
-            start_date=start_date_raw,
-            end_date=end_date_raw,
-            start_page=start_page,
-            end_page=end_page_value,
-            page_size=page_size,
-            search_filters=search_filters,
-            disclosure_type_groups=disclosure_type_groups,
-            last_report_only=last_report_only,
-            include_previous_disclosures=None,
-            wait_seconds_between_requests=wait_seconds,
-            timeout=timeout,
-            parse_mode="simpletable",
-            save=True,
-            progress_callback=local_progress_callback,
-            cancel_check=cancel_check,
-            max_workers=page_worker_count,
-        )
-        if cancel_check is not None and cancel_check():
-            raise DownloadCancelled("download job cancelled")
-    else:
-        _append_progress(
-            progress_log,
-            "SINGLE auto_page_download first_page_probe=1",
-            progress_callback,
-        )
-        cleanup_warnings = _run_auto_download_staged(
-            output_directory=output_directory,
-            payload=payload,
-            start_date=start_date_raw,
-            end_date=end_date_raw,
-            page_size=page_size,
-            search_filters=search_filters,
-            disclosure_type_groups=disclosure_type_groups,
-            last_report_only=last_report_only,
-            wait_seconds=wait_seconds,
-            timeout=timeout,
-            progress_callback=local_progress_callback,
-            cancel_check=cancel_check,
-            page_worker_count=page_worker_count,
-        )
-        for warning in cleanup_warnings:
-            _append_progress(
-                progress_log,
-                f"CLEANUP warning {warning}",
-                progress_callback,
-            )
 
     status = _download_integrity_status(output_directory, page_size)
     _append_status_progress(progress_log, status, progress_callback)
@@ -680,8 +693,6 @@ def _run_yearly(
                 "output_directory": str(chunk_output),
                 "start_date": chunk_start.isoformat(),
                 "end_date": chunk_end.isoformat(),
-                "start_page": 1,
-                "end_page": None,
                 "page_size": page_size,
                 "wait_seconds": wait_seconds,
                 "timeout": timeout,

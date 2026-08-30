@@ -42,8 +42,8 @@ test("inspection terminal processing owns an immutable job context", async () =>
     page.indexOf("await startDownloadJob(completedPayload, jobId)")
       < page.indexOf("clearActiveInspection(completedInspection)", page.indexOf("await startDownloadJob(completedPayload, jobId)")),
   );
-  assert.match(api, /startDownload\(payload: DownloadPayload, inspectionJobId\?: string\)/);
-  assert.match(api, /inspectionJobId \? \{ inspection_job_id: inspectionJobId \} : \{\}/);
+  assert.match(api, /startDownload\(payload: DownloadPayload, inspectionJobId: string\)/);
+  assert.match(api, /inspection_job_id: inspectionJobId/);
   assert.ok(completedBlock.indexOf("await onSuccess") < completedBlock.indexOf("setActiveJobId(null)"));
   assert.match(completedBlock, /activeJobIdRef\.current === jobId/);
   assert.match(completedBlock, /forgetJobId\(jobId\)/);

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, CircleHelp, Eraser, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
+import { ChevronDown, CircleHelp, Eraser, Info, ListPlus, Plus, Redo2, Save, Trash2, Undo2, Upload } from "lucide-react";
 import { Button, Card, CardContent, CardHeader, CardTitle, Input, Label } from "@finiq/ui";
 import { cn } from "@finiq/ui/utils";
 import { htmlControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
@@ -295,6 +295,15 @@ export function normalizeDisclosureConditionBlocks(value: unknown): DisclosureCo
     if (!row.value.trim() && row.operator !== "exists" && row.operator !== "empty") {
       throw new Error(`condition_blocks[${index}].value is required`);
     }
+    if (row.operator === "between") {
+      const values = row.value.replaceAll("..", "\n").replaceAll(",", "\n")
+        .split(/\r?\n/u)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      if (values.length !== 2) {
+        throw new Error("between operator requires exactly two values");
+      }
+    }
     return {
       connector: connector as DisclosureFilterConnector,
       open_count: row.open_count as number,
@@ -470,11 +479,13 @@ function FilterHelpPopover({
   title,
   children,
   panelClassName,
+  icon = "help",
 }: {
   ariaLabel: string;
   title: string;
   children: ReactNode;
   panelClassName: string;
+  icon?: "help" | "info";
 }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -516,7 +527,7 @@ function FilterHelpPopover({
         aria-label={ariaLabel}
         className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-500 dark:hover:bg-[#21262d] dark:hover:text-slate-200"
       >
-        <CircleHelp className="h-4 w-4" />
+        {icon === "info" ? <Info className="h-4 w-4" /> : <CircleHelp className="h-4 w-4" />}
       </button>
       {open && coords && createPortal(
         <div
@@ -556,7 +567,7 @@ function FieldHelpPopover() {
 
 function DerivedFilterHelpPopover({ description }: { description: string }) {
   return (
-    <FilterHelpPopover ariaLabel="파생 필터 설명" title="파생 필터 설명" panelClassName="w-80">
+    <FilterHelpPopover ariaLabel="파생 필터 주의사항" title="파생 필터 주의사항" panelClassName="w-80" icon="info">
       <p className="text-xs leading-5 text-slate-600 dark:text-slate-300">{description}</p>
     </FilterHelpPopover>
   );

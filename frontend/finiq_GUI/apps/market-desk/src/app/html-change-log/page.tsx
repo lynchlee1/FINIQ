@@ -56,7 +56,6 @@ export default function HtmlChangeLogPage() {
   const [selectedPreset, setSelectedPreset] = useState("");
   const [changeSearch, setChangeSearch] = useState("");
   const [showOnlyChanges, setShowOnlyChanges] = useState(false);
-  const [changeLimit, setChangeLimit] = useState("50");
   const [exportLatestOnly, setExportLatestOnly] = useState(false);
   const selectedPresetEntry = useMemo(
     () => presets.find((preset) => presetIdentity(preset) === selectedPreset),
@@ -145,7 +144,6 @@ export default function HtmlChangeLogPage() {
         body: JSON.stringify({
           ...resultSourcePayload(),
           summary_only: true,
-          limit: changeLimit === "" ? null : Number(changeLimit),
         }),
       });
       
@@ -296,15 +294,6 @@ export default function HtmlChangeLogPage() {
       },
       onError: (err) => { setStatus(err.message); setIsErrorStatus(true); },
       span: 2,
-    },
-    {
-      id: "changeLimit",
-      kind: "input",
-      type: "number",
-      label: "로딩 건수",
-      value: changeLimit,
-      onChange: setChangeLimit,
-      trailing: <Button variant="outline" onClick={() => setChangeLimit("")} className="h-10 dark:border-[#30363d] dark:hover:bg-[#21262d] dark:text-slate-200">전체</Button>,
     },
   ];
 

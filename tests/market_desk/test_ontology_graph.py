@@ -112,7 +112,6 @@ def _write_disclosure_shard(root: Path) -> Path:
                 acpt_no TEXT,
                 doc_no TEXT,
                 submitter TEXT,
-                source_file TEXT,
                 source_page INTEGER
             )
             """
@@ -202,13 +201,12 @@ def _write_disclosure_shard(root: Path) -> Path:
         json.dumps(
             {
                 "format": "finiq_disclosure_table_manifest_v1",
-                "schema_version": 2,
+                "schema_version": 4,
                 "table_name": "disclosures",
                 "summary": {"companies": 2, "disclosures": 4, "shards": 1},
                 "shards": [
                     {
                         "year": "2025",
-                        "relative_path": "2025.sqlite",
                         "companies": 2,
                         "disclosures": 4,
                     }
@@ -344,7 +342,7 @@ def test_ontology_queries_reject_missing_manifest_shards(tmp_path: Path) -> None
     manifest_path = _write_disclosure_shard(tmp_path)
     quanti_dir = _write_quanti_parquet(tmp_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    (manifest_path.parent / manifest["shards"][0]["relative_path"]).unlink()
+    (manifest_path.parent / f"{manifest['shards'][0]['year']}.sqlite").unlink()
 
     with pytest.raises(FileNotFoundError, match="KIND SQLite shard not found"):
         search_ontology_companies(

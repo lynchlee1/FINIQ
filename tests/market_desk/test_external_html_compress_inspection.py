@@ -18,6 +18,12 @@ from finiq.market_desk.web.features.disclosures.external_html_compress import (
     inspect_disclosure_external_html_compress_payload,
     rebuild_invalid_disclosure_external_html_compress_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_cleanup import (
+    create_external_html_integrity_baseline_payload,
+)
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _source_json_fingerprint,
+)
 from finiq.market_desk.web.features.disclosures.filter_presets import (
     manage_filter_presets_payload,
 )
@@ -58,23 +64,8 @@ def _compression_payload(
     )
     input_directory = Path(str(payload["input_directory"]))
     (input_directory / "2025").mkdir(parents=True)
-    (input_directory / "kind_disclosure_html_manifest.json").write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_html_manifest_v1",
-                "disclosures": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "title": "테스트 공시",
-                        "disclosed_at": "2025-01-01",
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    (input_directory / "2025" / "20250101000001.html").write_text(
+    html_path = input_directory / "2025" / "20250101000001.html"
+    html_path.write_text(
         """
         <html><body>
           <input type="hidden" name="acptNo" value="20250101000001" />
@@ -84,6 +75,23 @@ def _compression_payload(
           <select id="attachedDoc"><option value="20250101000888">첨부</option></select>
         </body></html>
         """,
+        encoding="utf-8",
+    )
+    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v2",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "title": "테스트 공시",
+                        "disclosed_at": "2025-01-01",
+                        **external_html_compress._html_file_integrity(html_path),
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     return payload
@@ -106,6 +114,53 @@ def test_external_html_compression_uses_and_creates_standard_output_directory(
 
     assert result["output_directory"] == str(output_directory)
     assert (output_directory / "compressed-external-html.json").is_file()
+
+
+def test_workspace_compression_uses_current_complete_filter_metadata(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    filtered_path = (
+        Path(str(payload["data_root"]))
+        / "03-filter"
+        / "bond_issuance"
+        / "filtered.json"
+    )
+    filtered = json.loads(filtered_path.read_text(encoding="utf-8"))
+    filtered["disclosures"][0].update(
+        {
+            "title": "현재 제목",
+            "company_key": "company:123456",
+            "company_cell_text": "현재 회사 표시값",
+        }
+    )
+    filtered_path.write_text(json.dumps(filtered, ensure_ascii=False), encoding="utf-8")
+    manifest_path = (
+        Path(str(payload["input_directory"]))
+        / "kind_disclosure_html_manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["disclosures"][0]["title"] = "오래된 제목"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    compress_disclosure_external_html_payload(payload)
+
+    compressed_path = (
+        Path(str(payload["output_directory"])) / "compressed-external-html.json"
+    )
+    record = json.loads(compressed_path.read_text(encoding="utf-8"))["records"][0]
+    assert record["title"] == "현재 제목"
+    assert record["metadata"]["company_key"] == "company:123456"
+    assert record["metadata"]["company_cell_text"] == "현재 회사 표시값"
+    assert inspect_disclosure_external_html_compress_payload(payload)["passed"] is True
+
+    filtered["disclosures"][0]["title"] = "더 최신 제목"
+    filtered_path.write_text(json.dumps(filtered, ensure_ascii=False), encoding="utf-8")
+
+    inspected = inspect_disclosure_external_html_compress_payload(payload)
+
+    assert inspected["passed"] is False
+    assert inspected["content_matches_source"] is False
 
 
 def test_external_html_compression_uses_requested_progress_interval(
@@ -244,6 +299,20 @@ def test_inspect_external_html_compression_skips_missing_source_directory(
     assert not (data_root / "01-list").exists()
     assert not (data_root / "02-table").exists()
     assert not (data_root / "05-internal-html-download").exists()
+
+
+def test_all_mode_inspection_rejects_wrong_filter_workflow_format(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    workflow_path = data_root / "03-filter" / "broken" / "filter.json"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text(json.dumps({"format": "wrong"}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Invalid disclosure filter workflow JSON"):
+        inspect_all_disclosure_external_html_compress_payload(
+            {"data_root": str(data_root), "parallel_workers": 1}
+        )
 
 
 def test_inspect_external_html_compression_ignores_filter_targets_without_html(
@@ -438,14 +507,67 @@ def test_derived_mode_inspects_the_same_owner_html_and_compressed_file(
     tmp_path: Path, monkeypatch
 ) -> None:
     payload = _compression_payload(tmp_path)
+    data_root = Path(str(payload["data_root"]))
+    parent_filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
+    parent_filtered = json.loads(parent_filtered_path.read_text(encoding="utf-8"))
+    second_disclosure = {
+        "acpt_no": "20250102000002",
+        "title": "두 번째 공시",
+        "disclosed_at": "2025-01-02",
+    }
+    parent_filtered["disclosures"].append(second_disclosure)
+    parent_filtered_path.write_text(
+        json.dumps(parent_filtered, ensure_ascii=False), encoding="utf-8"
+    )
+    input_directory = Path(str(payload["input_directory"]))
+    (input_directory / "2025" / "20250102000002.html").write_text(
+        """
+        <html><body>
+          <input type="hidden" name="acptNo" value="20250102000002" />
+          <select id="mainDoc">
+            <option value="20250102000999|Y" selected="selected">본문</option>
+          </select>
+          <select id="attachedDoc"><option value="20250102000888">첨부</option></select>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+    create_external_html_integrity_baseline_payload(
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "output_directory": str(input_directory),
+            "trust_existing_files": True,
+        }
+    )
     compress_disclosure_external_html_payload(payload)
+    child_mode = "bond_issuance_kosdaq"
+    child_filtered_path = (
+        parent_filtered_path.parent
+        / "subfilters"
+        / child_mode
+        / "filtered.json"
+    )
+    child_filtered_path.parent.mkdir(parents=True)
+    child_filtered_path.write_text(
+        json.dumps(
+            {
+                "format": "kind_disclosure_filter_v1",
+                "parent_mode": "bond_issuance",
+                "parent_result_fingerprint": _source_json_fingerprint(parent_filtered),
+                "disclosures": [second_disclosure],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.external_html_compress._workspace_filter_presets",
         lambda _data_root: [
             {"id": "bond_issuance", "mode": "bond_issuance"},
             {
                 "id": "bond_issuance/bond_issuance_kosdaq",
-                "mode": "bond_issuance_kosdaq",
+                "mode": child_mode,
                 "parent_mode": "bond_issuance",
             },
         ],
@@ -457,7 +579,35 @@ def test_derived_mode_inspects_the_same_owner_html_and_compressed_file(
 
     assert inspected["passed"] is True
     assert inspected["mode_count"] == 2
-    assert inspected["expected_records"] == 2
-    assert inspected["verified_records"] == 2
+    assert inspected["expected_records"] == 3
+    assert inspected["verified_records"] == 3
     assert inspected["repairable_failed_mode_count"] == 0
     assert all(result["passed"] for result in inspected["results"])
+
+    compressed_path = (
+        Path(str(payload["output_directory"])) / "compressed-external-html.json"
+    )
+    compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
+    compressed["records"] = [
+        record
+        for record in compressed["records"]
+        if record["acpt_no"] != second_disclosure["acpt_no"]
+    ]
+    compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
+    derived_payload = apply_workspace_defaults(
+        "external_html_compress",
+        {
+            "data_root": str(data_root),
+            "mode": child_mode,
+            "parent_mode": "bond_issuance",
+            "parallel_workers": 1,
+        },
+        create_workspace=False,
+    )
+
+    derived_inspection = inspect_disclosure_external_html_compress_payload(
+        derived_payload
+    )
+
+    assert derived_inspection["passed"] is False
+    assert "missing derived targets" in derived_inspection["error"]

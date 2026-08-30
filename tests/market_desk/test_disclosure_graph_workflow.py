@@ -85,6 +85,27 @@ def test_build_disclosure_graph_payload_writes_stage_09_graph(tmp_path: Path) ->
     assert saved["nodes"]
     assert saved["edges"]
 
+    def path_keys(value: object) -> list[str]:
+        if isinstance(value, dict):
+            return [
+                *[
+                    str(key)
+                    for key in value
+                    if str(key) in {"path", "source_file", "source_url"}
+                    or str(key).endswith("_path")
+                ],
+                *[
+                    key
+                    for child in value.values()
+                    for key in path_keys(child)
+                ],
+            ]
+        if isinstance(value, list):
+            return [key for child in value for key in path_keys(child)]
+        return []
+
+    assert path_keys(saved) == []
+
 
 def test_build_disclosure_graph_reads_linked_filter_and_converted_stages(
     tmp_path: Path,
@@ -137,6 +158,20 @@ def test_load_disclosure_graph_payload_returns_saved_document(tmp_path: Path) ->
     assert payload["format"] == "finiq_disclosure_graph_v1"
     assert payload["nodes"]
     assert payload["edges"]
+
+
+def test_load_disclosure_graph_payload_rejects_legacy_path_metadata(
+    tmp_path: Path,
+) -> None:
+    _write_rights_sources(tmp_path)
+    build_disclosure_graph_payload({"data_root": str(tmp_path)})
+    output_path = tmp_path / "09-disclosure-graph" / "disclosure-graph.json"
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    payload["metadata"]["source_path"] = "/legacy/parsed.json"
+    output_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="09단계 그래프만 다시 생성"):
+        load_disclosure_graph_payload({"data_root": str(tmp_path)})
 
 
 def test_disclosure_graph_routes_use_workspace_contract(tmp_path: Path) -> None:

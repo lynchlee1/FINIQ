@@ -189,7 +189,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
   const [timeout, setTimeoutVal] = useState("20");
   const [maxRequestsPerMinute, setMaxRequestsPerMinute] = useState("90");
   const [waitSeconds, setWaitSeconds] = useState("0");
-  const [limit, setLimit] = useState("");
   const [skipExisting, setSkipExisting] = useState(true);
   const [progressInterval, setProgressInterval] = useState("10");
   const [problemFileLimit, setProblemFileLimit] = useState("20");
@@ -315,7 +314,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
       timeout: Number(timeout),
       max_requests_per_minute: Number(maxRequestsPerMinute),
       wait_seconds: Number(waitSeconds),
-      limit: limit ? Number(limit) : null,
       skip_existing: skipExisting,
       progress_interval: Number(progressInterval),
       kind_proxy_urls: kindProxyUrls,
@@ -328,7 +326,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     timeout,
     maxRequestsPerMinute,
     waitSeconds,
-    limit,
     skipExisting,
     progressInterval,
     parsedProblemFileLimit,
@@ -702,14 +699,12 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
     { id: "timeout", kind: "input", type: "number", label: SETTINGS_LABELS.timeoutSeconds, value: timeout, onChange: setTimeoutVal },
     { id: "maxRequestsPerMinute", kind: "input", type: "number", label: SETTINGS_LABELS.maxRequestsPerMinute, value: maxRequestsPerMinute, onChange: setMaxRequestsPerMinute },
     { id: "waitSeconds", kind: "input", type: "number", label: SETTINGS_LABELS.requestIntervalSeconds, value: waitSeconds, onChange: setWaitSeconds },
-    { id: "limit", kind: "input", type: "number", label: SETTINGS_LABELS.maxItems, placeholder: "전체", value: limit, onChange: setLimit },
     { id: "progressInterval", kind: "input", type: "number", label: SETTINGS_LABELS.progressInterval, value: progressInterval, onChange: setProgressInterval, span: 2 },
     { id: "skipExisting", kind: "checkbox", checked: skipExisting, onChange: setSkipExisting, checkboxLabel: "기존 파일 건너뛰기", span: 2 },
     { id: "problemFileLimit", kind: "input", type: "number", label: "문제 파일 표시 수", value: problemFileLimit, onChange: setProblemFileLimit, span: 2 },
   ];
   const requestOptionFields = baseFields.filter((field) => ["timeout", "maxRequestsPerMinute", "waitSeconds"].includes(field.id));
   const executionOptionFields = baseFields.filter((field) => field.id === "progressInterval" || field.id === "skipExisting");
-  const testOptionFields = baseFields.filter((field) => field.id === "limit");
   const displayOptionFields = baseFields.filter((field) => field.id === "problemFileLimit");
 
   const compressionFields: DataPathField[] = [
@@ -1221,12 +1216,6 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                       <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">표시 옵션</p>
                     </div>
                     <HtmlWorkflowForm layout="inspector" fields={displayOptionFields} />
-                  </div>
-                  <div className="space-y-3">
-                    <div className="border-b border-[color:var(--tv-border)] pb-2">
-                      <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">테스트 옵션</p>
-                    </div>
-                    <HtmlWorkflowForm layout="inspector" fields={testOptionFields} />
                   </div>
                 </div>
               )}

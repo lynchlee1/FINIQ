@@ -170,9 +170,48 @@ def test_auto_download_resumes_staging_and_publishes_only_complete_result(
             encoding="utf-8"
         )
     )
-    assert input_snapshot["end_page"] == 3
+    assert "start_page" not in input_snapshot
+    assert "request_headers" not in input_snapshot
+    assert "end_page" not in input_snapshot
+    assert "wait_seconds_between_requests" not in input_snapshot
+    assert "timeout" not in input_snapshot
+    assert "parse_mode" not in input_snapshot
+    assert "request_headers" not in checkpoint["input"]
     assert checkpoint["completed"] is True
     assert checkpoint["last_saved_page"] == 3
+
+
+def test_auto_download_resumes_from_first_missing_staged_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_directory = tmp_path / "01-list"
+    fake_download = _FakeDownloadPages(fail_once_at_page=2)
+    _patch_download_pages(monkeypatch, fake_download)
+
+    with pytest.raises(RuntimeError, match="interrupted"):
+        _run_auto_download(output_directory)
+
+    staging_directory = kind_runner._download_staging_directory(output_directory)
+    page_two = staging_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=2)
+    page_three = staging_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=3)
+    page_two.unlink()
+    page_three.write_bytes(_result_page_html(page_number=3))
+    checkpoint_path = staging_directory / "kind_workflow.checkpoint.json"
+    checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    checkpoint["saved_files"] = [
+        name
+        for name in checkpoint["saved_files"]
+        if Path(name).name != page_two.name
+    ] + [page_three.name]
+    checkpoint["last_saved_page"] = 3
+    checkpoint["last_saved_file"] = page_three.name
+    checkpoint_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+    _run_auto_download(output_directory)
+
+    assert fake_download.ranges == [(1, 1), (2, 3), (2, 3), (1, 1)]
+    assert len(list(output_directory.glob("*_post_page_*.body"))) == 3
 
 
 def test_auto_download_consistency_failure_preserves_previous_output(

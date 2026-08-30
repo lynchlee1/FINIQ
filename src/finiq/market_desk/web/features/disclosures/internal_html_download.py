@@ -31,6 +31,10 @@ class _ContentPathMissingError(ValueError):
     pass
 
 
+class _EmptyBodyError(ValueError):
+    pass
+
+
 def _publish_validated_internal_html(output_path: Path, content: bytes) -> None:
     """Validate downloaded HTML beside its target before replacing the target."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,7 +158,12 @@ def _fetch_internal_html(
     )
     contents_response.raise_for_status()
     paths = search_paths(contents_response.content)
-    if paths is None or not paths.get("doc_loc_path"):
+    if paths is None:
+        raise ValueError(
+            "KIND searchContents response does not contain the expected setPath: "
+            f"acpt_no={acpt_no} doc_no={doc_no}"
+        )
+    if not paths.get("doc_loc_path"):
         msg = f"content path not found for acpt_no={acpt_no} doc_no={doc_no}"
         raise _ContentPathMissingError(msg)
 
@@ -164,7 +173,12 @@ def _fetch_internal_html(
         paths["doc_loc_path"], headers=request_headers, timeout=timeout
     )
     body_response.raise_for_status()
-    return body_response.content
+    internal_html = body_response.content
+    if not internal_html.strip():
+        raise _EmptyBodyError(
+            f"empty body for acpt_no={acpt_no} doc_no={doc_no}"
+        )
+    return internal_html
 
 
 def _load_compressed_external_html_file_payload(source_path: Path) -> dict[str, Any]:
@@ -770,9 +784,6 @@ def download_disclosure_internal_html_payload(
             )
         source_json, _source_json_path = _load_workspace_filtered_payload(body)
         child_acpt_numbers = collect_acpt_numbers_from_json(source_json)
-        child_acpt_numbers = _apply_limit_to_acpt_numbers(
-            child_acpt_numbers, body.get("limit")
-        )
         parent_records = {
             acpt_no: record
             for record, acpt_no in _validated_compressed_records(compressed_payload)
@@ -849,7 +860,6 @@ def download_disclosure_internal_html_payload(
         compressed_payload
     )
 
-    targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
     target_years = {
         target["acpt_no"]: target["year"]
@@ -948,6 +958,13 @@ def download_disclosure_internal_html_payload(
         actual_integrity_by_acpt_no = output_summary.pop(
             "_target_integrity_by_acpt_no"
         )
+        stale_placeholder_acpt_numbers.update(
+            _unsupported_source_unavailable_acpt_numbers(
+                acpt_numbers=output_summary["existing_target_acpt_numbers"],
+                selected_doc_numbers=_selected_main_doc_numbers(source_json),
+                integrity_by_acpt_no=actual_integrity_by_acpt_no,
+            )
+        )
         integrity_summary = _inspect_html_integrity(
             resolved_output_directory,
             acpt_numbers,
@@ -1045,6 +1062,9 @@ def download_disclosure_internal_html_payload(
             spacing_limiter = RequestSpacingLimiter(
                 max(wait_seconds, 60.0 / max_requests_per_minute)
             )
+            direct_rate_limiter = SlidingWindowRateLimiter(
+                max_requests_per_minute
+            )
             download_targets = [
                 target_by_acpt_no[acpt_no] for acpt_no in download_acpt_numbers
             ]
@@ -1065,6 +1085,7 @@ def download_disclosure_internal_html_payload(
                     or bool(cancel_check and cancel_check()),
                     max_workers=max_workers,
                     spacing_limiter=spacing_limiter,
+                    _rate_limiter=direct_rate_limiter,
                     kind_proxy_urls=body.get("kind_proxy_urls"),
                     target_output_directories={
                         target["acpt_no"]: (
@@ -1089,15 +1110,11 @@ def download_disclosure_internal_html_payload(
                     "다운로드 실패 대상의 KIND 원본 재검증을 시작합니다: "
                     f"{len(revalidation_targets)}건."
                 )
-                revalidation_rate_limiter = SlidingWindowRateLimiter(
-                    max_requests_per_minute
-                )
-
                 def wait_for_revalidation_request() -> None:
                     if wait_for_html_download_request_slot(
                         lambda: _is_cancelled(cancel_token)
                         or bool(cancel_check and cancel_check()),
-                        local_limiter=revalidation_rate_limiter,
+                        local_limiter=direct_rate_limiter,
                         spacing_limiter=spacing_limiter,
                     ):
                         raise InterruptedError("internal HTML revalidation cancelled")
@@ -1124,6 +1141,8 @@ def download_disclosure_internal_html_payload(
                             break
                         except _ContentPathMissingError:
                             reason = "content_path_missing"
+                        except _EmptyBodyError:
+                            reason = "empty_body"
                         except Exception as exc:
                             emit(f"KIND 원본 재검증 실패 acpt_no={acpt_no}: {exc}")
                             continue
@@ -1148,13 +1167,14 @@ def download_disclosure_internal_html_payload(
                             "reason": reason,
                         }
                         if (
-                            _is_valid_html(output_path)
+                            acpt_no not in stale_placeholder_acpt_numbers
+                            and _is_valid_html(output_path)
                             and _internal_html_source_unavailable_placeholder(output_path)
                             is None
                         ):
                             source_unavailable_by_acpt_no.pop(acpt_no, None)
                             emit(
-                                "KIND 본문 경로가 없어 기존 정상 HTML을 보존합니다: "
+                                "KIND 원본이 없어 기존 정상 HTML을 보존합니다: "
                                 f"acpt_no={acpt_no}"
                             )
                             continue
@@ -1217,6 +1237,7 @@ def download_disclosure_internal_html_payload(
         source_json=source_json,
         source_integrity=source_integrity_by_acpt_no,
         source_unavailable=source_unavailable_by_acpt_no,
+        selected_main_doc_numbers=_selected_main_doc_numbers(source_json),
     )
     emit(f"HTML 메타데이터 저장 완료: {manifest_path}")
     emit(

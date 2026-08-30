@@ -144,7 +144,7 @@ def _normalize_disclosure_type_group_value(group_value: DisclosureTypeGroupValue
         raw_codes = [str(code) for code in group_value]
     else:
         raw_codes = [str(group_value)]
-    return [code.strip() for code in raw_codes if str(code).strip()]
+    return sorted({code.strip() for code in raw_codes if str(code).strip()})
 
 
 def _split_disclosure_group_field_name(field_name: str) -> tuple[str, str] | None:

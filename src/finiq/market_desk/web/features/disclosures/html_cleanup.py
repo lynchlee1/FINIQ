@@ -64,7 +64,6 @@ def _load_internal_html_integrity_source(
             )
         )
 
-    targets = _apply_limit_to_targets(targets, body.get("limit"))
     acpt_numbers = [target["acpt_no"] for target in targets]
     target_years = {target["acpt_no"]: target["year"] for target in targets}
     return source_json, str(source_path), acpt_numbers, target_years
@@ -86,7 +85,6 @@ def _load_html_integrity_source(
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
     if not acpt_numbers:
         raise ValueError("No acpt_no values found in JSON")
-    acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
     return source_json, source_path, acpt_numbers, target_years, "external"
 
@@ -212,6 +210,15 @@ def _check_disclosure_html_output_directory_payload(
     output_directory = Path(summary["output_directory"])
     loaded_manifest_integrity = _load_html_manifest_integrity(output_directory)
     selected_doc_numbers = _selected_main_doc_numbers(source_json)
+    unsupported_placeholders = (
+        _unsupported_source_unavailable_acpt_numbers(
+            acpt_numbers=summary["existing_target_acpt_numbers"],
+            selected_doc_numbers=selected_doc_numbers,
+            integrity_by_acpt_no=actual_integrity_by_acpt_no,
+        )
+        if selected_doc_numbers
+        else []
+    )
     recorded_source_unavailable = _load_html_manifest_source_unavailable(
         output_directory
     )
@@ -263,7 +270,7 @@ def _check_disclosure_html_output_directory_payload(
         recorded_source_unavailable
     )
     stale_placeholder_acpt_numbers = sorted(
-        (set(placeholders) | recorded_existing)
+        (set(placeholders) | recorded_existing | set(unsupported_placeholders))
         - set(source_unavailable_acpt_numbers)
     )
     if stale_placeholder_acpt_numbers:
@@ -580,7 +587,6 @@ def create_external_html_integrity_baseline_payload(
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
     if not acpt_numbers:
         raise ValueError("No acpt_no values found in JSON")
-    acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
     target_years = _target_years_from_json(source_json, acpt_numbers)
     if body.get("parent_mode") not in (None, ""):
         saved_paths, _verification = _strictly_reuse_parent_html(
@@ -701,6 +707,36 @@ def create_internal_html_integrity_baseline_payload(
         raise ValueError("기준 해시를 생성할 정상 내부 HTML이 없습니다.")
 
     source_integrity = output_summary.pop("_target_integrity_by_acpt_no")
+    selected_main_doc_numbers = _selected_main_doc_numbers(source_json)
+    unsupported_placeholders = _unsupported_source_unavailable_acpt_numbers(
+        acpt_numbers=baseline_acpt_numbers,
+        selected_doc_numbers=selected_main_doc_numbers,
+        integrity_by_acpt_no=source_integrity,
+    )
+    if unsupported_placeholders:
+        raise ValueError(
+            "unsupported source-unavailable placeholder for acpt_no="
+            + ", ".join(unsupported_placeholders[:10])
+        )
+    source_unavailable: dict[str, dict[str, str]] = {}
+    for acpt_no in baseline_acpt_numbers:
+        selected_doc_no = selected_main_doc_numbers.get(acpt_no)
+        placeholder = _internal_html_source_unavailable_placeholder_from_integrity(
+            acpt_no=acpt_no,
+            doc_no=selected_doc_no or "",
+            integrity=source_integrity.get(acpt_no),
+        )
+        if placeholder is None:
+            continue
+        if placeholder["doc_no"] != selected_doc_no:
+            raise ValueError(
+                "source-unavailable placeholder doc_no does not match "
+                f"selected_main_doc_no for acpt_no={acpt_no}"
+            )
+        source_unavailable[acpt_no] = {
+            "doc_no": placeholder["doc_no"],
+            "reason": placeholder["reason"],
+        }
     if progress_callback is not None:
         progress_callback(
             f"현재 내부 HTML {len(baseline_acpt_numbers)}건의 기준 해시를 생성합니다."
@@ -711,6 +747,8 @@ def create_internal_html_integrity_baseline_payload(
         acpt_numbers=baseline_acpt_numbers,
         source_json=source_json,
         source_integrity=source_integrity,
+        source_unavailable=source_unavailable,
+        selected_main_doc_numbers=selected_main_doc_numbers,
     )
     if progress_callback is not None:
         progress_callback(f"내부 HTML 기준 해시 저장 완료: {manifest_path}")
@@ -752,7 +790,6 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
                 source_json
             )
         )
-        targets = _apply_limit_to_targets(targets, body.get("limit"))
         acpt_numbers = [target["acpt_no"] for target in targets]
         resolved_source_path = str(source_compressed_json_path)
     else:
@@ -761,12 +798,20 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         if not acpt_numbers:
             msg = "No acpt_no values found in JSON"
             raise ValueError(msg)
-        acpt_numbers = _apply_limit_to_acpt_numbers(acpt_numbers, body.get("limit"))
 
     manifest_path = _write_html_manifest(
         output_directory=resolved_output_directory,
         acpt_numbers=acpt_numbers,
         source_json=source_json,
+        **(
+            {
+                "selected_main_doc_numbers": _selected_main_doc_numbers(
+                    source_json
+                )
+            }
+            if source_compressed_json_path_raw
+            else {}
+        ),
     )
     return {
         "format": "finiq_disclosure_html_manifest_write_v1",

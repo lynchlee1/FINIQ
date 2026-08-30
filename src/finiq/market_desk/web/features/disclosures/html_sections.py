@@ -589,7 +589,7 @@ def _collect_html_file_page(
 ) -> tuple[list[Path], bool]:
     start = (page - 1) * page_size
     stop = start + page_size + 1
-    selected = _collect_html_files(input_directory, None)[start:stop]
+    selected = _collect_html_files(input_directory)[start:stop]
     return selected[:page_size], len(selected) > page_size
 
 
@@ -800,7 +800,7 @@ def summarize_disclosure_html_section_kinds_payload(
             "입력 폴더에서 목차 조합 확인 대상 HTML을 찾습니다. "
             f"병렬 처리 {workers}개를 사용합니다."
         )
-    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    html_files = _collect_html_files(input_directory)
     if progress_callback is not None:
         progress_callback(
             f"목차 조합 확인 대상 HTML {len(html_files)}건을 찾았습니다. "
@@ -895,7 +895,7 @@ def inspect_disclosure_html_sections_payload(
     collect_started_at = time.monotonic()
     if progress_callback is not None:
         progress_callback("입력 폴더에서 목차 확인 대상 HTML을 찾습니다.")
-    html_files = _collect_html_files(input_directory, _parse_limit(body.get("limit")))
+    html_files = _collect_html_files(input_directory)
     workers = parse_html_section_worker_count(body.get("workers"))
     report_limit = _parse_problem_report_limit(body.get("report_limit"))
     progress_interval = _parse_section_progress_interval(
@@ -1027,7 +1027,7 @@ def inspect_disclosure_html_sections_payload(
     }
 
 
-def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
+def _collect_html_files(input_directory: Path) -> list[Path]:
     resolved_root = input_directory.resolve()
     files: list[Path] = []
     invalid_paths: list[str] = []
@@ -1063,7 +1063,7 @@ def _collect_html_files(input_directory: Path, limit: int | None) -> list[Path]:
         if path.stem in stems:
             raise ValueError(f"duplicate HTML filename stem: {path.stem}")
         stems.add(path.stem)
-    return files[:limit] if limit is not None else files
+    return files
 
 
 def _relative_source_path(input_directory: Path, source_file: Path) -> str:
@@ -1219,16 +1219,6 @@ def _reject_year_directly_under_sections_stage(output_path: Path) -> None:
         )
 
 
-def _parse_limit(value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    parsed = int(value)
-    if parsed < 1:
-        msg = "limit must be >= 1"
-        raise ValueError(msg)
-    return parsed
-
-
 def _render_without_section_plans(
     document: html.HtmlElement,
     container: etree._Element,
@@ -1330,9 +1320,8 @@ def inspect_disclosure_html_section_output_payload(
     if not input_directory.is_dir():
         raise ValueError(f"input_directory does not exist: {input_directory}")
 
-    all_html_files = _collect_html_files(input_directory, None)
-    limit = _parse_limit(body.get("limit"))
-    html_files = all_html_files[:limit] if limit is not None else all_html_files
+    all_html_files = _collect_html_files(input_directory)
+    html_files = all_html_files
     all_expected_relative_paths = {
         _relative_source_path(input_directory, source_file)
         for source_file in all_html_files
@@ -1452,9 +1441,8 @@ def save_disclosure_html_sections_payload(
 
     collect_started_at = time.monotonic()
     emit("입력 폴더에서 목차 분리 대상 HTML을 찾습니다.")
-    all_html_files = _collect_html_files(input_directory, None)
-    limit = _parse_limit(body.get("limit"))
-    html_files = all_html_files[:limit] if limit is not None else all_html_files
+    all_html_files = _collect_html_files(input_directory)
+    html_files = all_html_files
     expected_relative_paths = {
         _relative_source_path(input_directory, source_file)
         for source_file in html_files

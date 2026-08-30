@@ -25,7 +25,7 @@ import {
 } from "@/components/disclosures/DisclosureConditionFilterCard";
 import { WorkflowPathSettings } from "@/components/data-path/WorkflowPathSettings";
 import { DisclosureStageStorageSettings } from "@/components/data-path/DisclosureStageStorageSettings";
-import { HtmlInspectorField, HtmlInspectorToggle, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
+import { HtmlInspectorField, htmlInspectorControlClassName } from "@/components/html-workflow/HtmlWorkflowTemplate";
 import {
   deleteDisclosureConditionPreset,
   listDisclosureConditionPresets,
@@ -132,8 +132,6 @@ export default function FilterPage() {
   const [presets, setPresets] = useState<DisclosureConditionPreset[]>([]);
   const [filterLevel, setFilterLevel] = useState<FilterLevel>("top-level");
   const [parentMode, setParentMode] = useState("");
-  const [limitUnlimited, setLimitUnlimited] = useState(true);
-  const [limit, setLimit] = useState("1000");
   const [filterWorkers, setFilterWorkers] = useState("1");
   const [progressInterval, setProgressInterval] = useState("1000");
   const [result, setResult] = useState<FilterResult | null>(null);
@@ -312,12 +310,8 @@ export default function FilterPage() {
   }, [titlePageCount, titlePageIndex, titleResult]);
 
   const buildPayload = () => {
-    const configuredLimit = Number(limit);
     const configuredWorkers = Number(filterWorkers);
     const configuredProgressInterval = Number(progressInterval);
-    if (!Number.isInteger(configuredLimit) || configuredLimit < 1) {
-      throw new Error("limit must be a positive integer");
-    }
     if (!Number.isInteger(configuredWorkers) || configuredWorkers < 1) {
       throw new Error("filter_workers must be a positive integer");
     }
@@ -333,9 +327,6 @@ export default function FilterPage() {
       } : {}),
       filter_blocks: normalizeDisclosureConditionBlocks(conditions),
       title_expression: "",
-      limit: limitUnlimited ? null : configuredLimit,
-      limit_unlimited: limitUnlimited,
-      return_limit: configuredLimit,
       include_external_html_download_acpt_numbers: true,
       filter_workers: configuredWorkers,
       progress_interval: configuredProgressInterval,
@@ -766,7 +757,7 @@ export default function FilterPage() {
             showPresetActions={taskMode === "filter"}
             showEyebrow={false}
             presetSelectorHelpDescription={filterLevel === "derived"
-              ? "파생 필터는 완료된 상위 필터 결과에만 조건을 추가하며, 한 단계까지만 만들 수 있습니다."
+              ? "파생 필터는 완료된 상위 필터 결과만 다시 검색하므로 최종 결과는 상위 필터를 벗어나지 않습니다. 다만 OR 조건을 추가하면 파생 조건식 자체가 예상보다 넓어질 수 있으니 괄호 범위와 조건 연결을 확인하세요. 파생 단계는 한 단계만 만들 수 있습니다."
               : undefined}
             identityControls={(
               <div className="grid gap-4">
@@ -962,19 +953,6 @@ export default function FilterPage() {
                 disabled={isJobActive}
                 onError={handlePathError}
               />
-              {taskMode === "filter" && <div className="space-y-3">
-                <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">결과 범위</p>
-                </div>
-              <div className="space-y-2">
-                <HtmlInspectorField label="제한 없음">
-                  <HtmlInspectorToggle checked={limitUnlimited} onCheckedChange={setLimitUnlimited} />
-                </HtmlInspectorField>
-                <HtmlInspectorField label={SETTINGS_LABELS.maxItems}>
-                  <Input type="number" min="1" max="10000" step="1" value={limit} disabled={limitUnlimited} onChange={(event) => setLimit(event.target.value)} className={`${htmlInspectorControlClassName} disabled:opacity-50`} />
-                </HtmlInspectorField>
-              </div>
-              </div>}
               <div className="space-y-3">
                 <div className="border-b border-slate-200 pb-2 dark:border-[#30363d]">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">실행 옵션</p>

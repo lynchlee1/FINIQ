@@ -369,10 +369,11 @@ test("disclosure filter removes the parser mode from the data path card", async 
   assert.doesNotMatch(dataPathCard, /파싱 모드/);
 });
 
-test("disclosure filter initializes counts to 1000 and submits them without fallback", async () => {
+test("disclosure filter has no legacy execution result limit", async () => {
   const source = await readFile(filterPagePath, "utf8");
 
-  assert.match(source, /const \[limit, setLimit\] = useState\("1000"\)/);
+  assert.doesNotMatch(source, /const \[limit, setLimit\]/);
+  assert.doesNotMatch(source, /limit_unlimited|return_limit|결과 범위/);
   assert.match(source, /const \[progressInterval, setProgressInterval\] = useState\("1000"\)/);
   assert.match(source, /progress_interval: configuredProgressInterval/);
   assert.doesNotMatch(source, /Number\(progressInterval \|\| 1000\)/);
@@ -427,8 +428,9 @@ test("disclosure condition card documents each filter field with a stored exampl
   const source = await readFile(disclosureConditionCardPath, "utf8");
 
   assert.match(source, /ariaLabel="필드 설명" title="필드 설명"/);
-  assert.match(source, /ariaLabel="파생 필터 설명" title="파생 필터 설명"/);
+  assert.match(source, /ariaLabel="파생 필터 주의사항" title="파생 필터 주의사항"/);
   assert.match(source, /<CircleHelp className="h-4 w-4" \/>/);
+  assert.match(source, /<Info className="h-4 w-4" \/>/);
   assert.match(source, /DISCLOSURE_FILTER_MARKET_VALUES = \["유가증권", "코스닥", "코넥스"\]/);
   assert.match(source, /\["badges", "배지"\]/);
   assert.match(source, /공시 제목입니다\./);

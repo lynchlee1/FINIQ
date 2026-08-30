@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -22,6 +21,7 @@ from finiq.market_desk.web.features.disclosures.external_compact import (
 )
 from finiq.market_desk.web.features.disclosures.external_html_compress import (
     compress_disclosure_external_html_payload,
+    inspect_disclosure_external_html_compress_payload,
 )
 from finiq.market_desk.web.features.disclosures.external_html_download import (
     download_disclosure_external_html_payload,
@@ -54,6 +54,7 @@ from finiq.market_desk.web.features.downloads.kind_api import run_download_actio
 from finiq.market_desk.web.features.downloads.kind_common import (
     DownloadInputMetadataError,
     _download_input_snapshot_from_payload,
+    _normalize_disclosure_type_groups,
     _require_current_download_input_snapshot,
     _split_yearly_ranges,
 )
@@ -184,14 +185,12 @@ def normalize_automation_profile(payload: dict[str, Any]) -> dict[str, Any]:
     if bool(raw_search.get("last_report_only")):
         raise ValueError("공시 자동화에서는 최종보고서만 옵션을 사용할 수 없습니다.")
 
-    disclosure_groups = raw_search.get("disclosure_type_groups") or {}
-    if not isinstance(disclosure_groups, dict):
-        raise ValueError("disclosure_type_groups must be an object")
-    normalized_groups = {
-        str(key): sorted({str(code).strip() for code in value if str(code).strip()})
-        for key, value in disclosure_groups.items()
-        if isinstance(value, list)
-    }
+    normalized_groups = _normalize_disclosure_type_groups(
+        {
+            "disclosure_type_groups": raw_search.get("disclosure_type_groups")
+            or {}
+        }
+    ) or {}
 
     filter_blocks = raw_selection.get("filter_blocks") or []
     if not isinstance(filter_blocks, list):
@@ -316,6 +315,7 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
     semantic: dict[str, Any] = {"stage": stage}
     if stage >= 1:
         semantic["s1_search"] = decisions["s1_search"]
+        semantic["page_size"] = profile["execution"]["page_size"]
     if stage >= 3:
         semantic["s3_selection"] = decisions["s3_selection"]
     if stage >= 6:
@@ -324,6 +324,21 @@ def _stage_config_hash(profile: dict[str, Any], stage: int) -> str:
     if stage >= 7:
         semantic["parser_method"] = profile["execution"]["parser_method"]
     return _canonical_hash(semantic)
+
+
+def _profile_semantic_hash(profile: dict[str, Any]) -> str:
+    return _canonical_hash(
+        {
+            "format": profile["format"],
+            "data_root": profile["data_root"],
+            "steps": profile["steps"],
+            "execution_mask": profile["execution_mask"],
+            "decisions": profile["decisions"],
+            "mode": profile["execution"]["mode"],
+            "parser_method": profile["execution"]["parser_method"],
+            "page_size": profile["execution"]["page_size"],
+        }
+    )
 
 
 def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
@@ -458,8 +473,6 @@ def _snapshot_semantics(snapshot: dict[str, Any]) -> dict[str, Any]:
         "disclosure_type_groups",
         "last_report_only",
         "include_previous_disclosures",
-        "wait_seconds_between_requests",
-        "timeout",
     )
     return {key: snapshot.get(key) for key in keys}
 
@@ -665,19 +678,20 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
             reason="외부 HTML 압축 JSON의 대상이 현재 필터 결과와 다릅니다.",
             details=verification,
         )
-    saved = _read_json_object(compressed_path)
-    with tempfile.TemporaryDirectory(prefix="finiq-external-inspection-") as temporary:
-        compress_disclosure_external_html_payload(
-            {
-                "input_directory": str(output_directory),
-                "output_directory": temporary,
-                "parallel_workers": profile["execution"]["local_workers"],
-            }
-        )
-        rebuilt = _read_json_object(Path(temporary) / "compressed-external-html.json")
-    if saved != rebuilt:
+    inspected = inspect_disclosure_external_html_compress_payload(
+        {
+            "data_root": profile["data_root"],
+            "mode": profile["execution"]["mode"],
+            "input_directory": str(output_directory),
+            "output_directory": str(compressed_path.parent),
+            "parallel_workers": profile["execution"]["local_workers"],
+        }
+    )
+    if not inspected["passed"]:
         return _inspection_failure(
-            4, reason="현재 외부 HTML을 압축한 결과와 저장된 JSON이 다릅니다."
+            4,
+            reason="현재 외부 HTML을 압축한 결과와 저장된 JSON이 다릅니다.",
+            details=inspected,
         )
     return _inspection_success(
         4,
@@ -877,7 +891,7 @@ def build_automation_plan_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "format": "finiq_disclosure_automation_plan_v1",
         "profile": profile,
-        "profile_hash": _canonical_hash(profile),
+        "profile_hash": _profile_semantic_hash(profile),
         "trigger": trigger,
         "execution_allowed": not blocked,
         "stages": stages,
@@ -1060,6 +1074,8 @@ def _run_stage(
             raise RuntimeError("Job cancelled")
         compress_result = compress_disclosure_external_html_payload(
             {
+                "data_root": str(root),
+                "mode": mode,
                 "input_directory": str(workspace.external_mode(mode)),
                 "output_directory": str(workspace.external_compress_mode(mode)),
                 "parallel_workers": execution["local_workers"],

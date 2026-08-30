@@ -60,14 +60,149 @@ def _quoted_sqlite_identifier(value: str) -> str:
     return f'"{value.replace(chr(34), chr(34) + chr(34))}"'
 
 
+def _disclosure_index_specs(table_name: str) -> dict[str, tuple[str, ...]]:
+    return {
+        f"idx_{table_name}_date": ("disclosed_date",),
+        f"idx_{table_name}_company": ("company_name",),
+        f"idx_{table_name}_company_id": ("company_id",),
+        f"idx_{table_name}_acpt_no": ("acpt_no",),
+        f"idx_{table_name}_market": ("market",),
+        f"idx_{table_name}_title": ("title",),
+    }
+
+
+def _validate_sqlite_shard_structure(
+    connection: sqlite3.Connection,
+    *,
+    manifest: dict[str, Any],
+    shard: dict[str, Any],
+    shard_path: Path,
+    table_name: str,
+    disclosures: int,
+    companies: int,
+    unlinked_disclosures: int,
+) -> None:
+    columns = _sqlite_table_columns(connection, table_name)
+    for column_name in (
+        *_SQLITE_CONTENT_FINGERPRINT_FIELDS,
+        "source_page",
+    ):
+        _sqlite_select_column(columns, column_name)
+
+    shard_year = str(shard.get("year") or "").strip()
+    if len(shard_year) != 4 or not shard_year.isdigit():
+        raise ValueError(f"SQLite manifest shard.year is invalid: {shard_path}")
+    if shard_path.name != f"{shard_year}.sqlite":
+        raise ValueError(
+            f"연도별 SQLite 파일명이 연도와 다릅니다: year={shard_year}, file={shard_path}"
+        )
+
+    expected_companies_value = shard.get("companies")
+    if expected_companies_value is None:
+        raise ValueError(
+            f"SQLite manifest shard.companies is required: {shard_path}"
+        )
+    if int(expected_companies_value) != companies:
+        raise ValueError(
+            "연도별 SQLite 파일의 회사 건수가 다릅니다: "
+            f"파일={shard_path}, 변환 기록={int(expected_companies_value)}, "
+            f"실제 행={companies}"
+        )
+
+    try:
+        metadata_rows = connection.execute(
+            "SELECT key, value FROM table_metadata"
+        ).fetchall()
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(
+            f"연도별 SQLite 파일의 table_metadata를 읽을 수 없습니다: {shard_path}"
+        ) from exc
+    metadata = {str(key): str(value) for key, value in metadata_rows}
+    expected_metadata = {
+        "format": "finiq_disclosure_table_sqlite",
+        "shard_format": "finiq_disclosure_table_sqlite_shard",
+        "schema_version": "4",
+        "source_type": str(manifest.get("source_type") or ""),
+        "table_name": table_name,
+        "shard_year": shard_year,
+        "companies": str(companies),
+        "disclosures": str(disclosures),
+        "unlinked_disclosures": str(unlinked_disclosures),
+        "fts_enabled": "true",
+    }
+    mismatched_metadata = {
+        key: {"expected": value, "actual": metadata.get(key)}
+        for key, value in expected_metadata.items()
+        if metadata.get(key) != value
+    }
+    if mismatched_metadata:
+        raise ValueError(
+            "연도별 SQLite 파일의 table_metadata가 변환 계약과 다릅니다: "
+            f"파일={shard_path}, 불일치={mismatched_metadata}"
+        )
+
+    expected_index_specs = _disclosure_index_specs(table_name)
+    expected_indexes = list(expected_index_specs)
+    if shard.get("indexes") != expected_indexes:
+        raise ValueError(
+            "SQLite manifest shard.indexes가 필수 인덱스와 다릅니다: "
+            f"파일={shard_path}"
+        )
+    actual_indexes = {
+        str(row[1])
+        for row in connection.execute(
+            f"PRAGMA index_list({_quoted_sqlite_identifier(table_name)})"
+        ).fetchall()
+    }
+    for index_name, expected_columns in expected_index_specs.items():
+        if index_name not in actual_indexes:
+            raise ValueError(
+                f"연도별 SQLite 파일에 필수 인덱스가 없습니다: 파일={shard_path}, index={index_name}"
+            )
+        actual_columns = tuple(
+            str(row[2])
+            for row in connection.execute(
+                f"PRAGMA index_info({_quoted_sqlite_identifier(index_name)})"
+            ).fetchall()
+        )
+        if actual_columns != expected_columns:
+            raise ValueError(
+                "연도별 SQLite 파일의 인덱스 열이 다릅니다: "
+                f"파일={shard_path}, index={index_name}, "
+                f"expected={expected_columns}, actual={actual_columns}"
+            )
+
+    fts_table = f"{table_name}_fts"
+    if shard.get("fts_enabled") is not True:
+        raise ValueError(
+            f"SQLite manifest shard.fts_enabled must be true: {shard_path}"
+        )
+    fts_definition = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (fts_table,),
+    ).fetchone()
+    if fts_definition is None or "using fts5" not in str(
+        fts_definition[0] or ""
+    ).casefold():
+        raise ValueError(f"연도별 SQLite 파일에 FTS5 표가 없습니다: {shard_path}")
+    quoted_fts = _quoted_sqlite_identifier(fts_table)
+    try:
+        connection.execute(
+            f"INSERT INTO {quoted_fts}({quoted_fts}, rank) VALUES ('integrity-check', 1)"
+        )
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(
+            f"연도별 SQLite 파일의 FTS5 인덱스가 본문과 일치하지 않습니다: {shard_path}"
+        ) from exc
+    finally:
+        connection.rollback()
+
+
 def _resolve_sqlite_shard_path(manifest_path: Path, shard: dict[str, Any]) -> Path:
-    relative_path = str(shard.get("relative_path") or "").strip()
-    if not relative_path:
-        raise ValueError("SQLite manifest shard.relative_path is required")
-    shard_path = Path(relative_path)
-    if shard_path.is_absolute() or len(shard_path.parts) != 1:
-        raise ValueError("SQLite manifest shard.relative_path must be a file name")
-    return (manifest_path.parent / shard_path).resolve()
+    shard_year = str(shard.get("year") or "").strip()
+    if len(shard_year) != 4 or not shard_year.isdigit():
+        raise ValueError("SQLite manifest shard.year must be a four-digit year")
+    return (manifest_path.parent / f"{shard_year}.sqlite").resolve()
 
 
 def _validate_sqlite_manifest_counts(
@@ -75,10 +210,11 @@ def _validate_sqlite_manifest_counts(
     manifest: dict[str, Any],
     *,
     filter_workers: object = None,
+    validate_structure: bool = False,
 ) -> None:
-    if manifest.get("schema_version") != 3:
+    if manifest.get("schema_version") != 4:
         raise ValueError(
-            f"SQLite manifest schema_version must be 3: {manifest_path}"
+            f"SQLite manifest schema_version must be 4: {manifest_path}"
         )
     table_name = (
         str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
@@ -104,27 +240,40 @@ def _validate_sqlite_manifest_counts(
             row = connection.execute(
                 f"""
                 SELECT COUNT(*),
-                       SUM(CASE WHEN company_key IS NULL THEN 1 ELSE 0 END)
+                       SUM(CASE WHEN company_key IS NULL THEN 1 ELSE 0 END),
+                       COUNT(DISTINCT company_key)
                 FROM {quoted_table}
                 """
             ).fetchone()
             actual = int(row[0])
             actual_unlinked = int(row[1] or 0)
+            actual_companies = int(row[2] or 0)
+            if actual != expected:
+                msg = (
+                    "연도별 SQLite 파일의 공시 건수가 다릅니다: "
+                    f"파일={shard_path}, 변환 기록={expected}, 실제 행={actual}"
+                )
+                raise ValueError(msg)
+            if actual_unlinked != expected_unlinked:
+                msg = (
+                    "연도별 SQLite 파일의 회사 미연결 공시 건수가 다릅니다: "
+                    f"파일={shard_path}, 변환 기록={expected_unlinked}, "
+                    f"실제 행={actual_unlinked}"
+                )
+                raise ValueError(msg)
+            if validate_structure:
+                _validate_sqlite_shard_structure(
+                    connection,
+                    manifest=manifest,
+                    shard=shard,
+                    shard_path=shard_path,
+                    table_name=table_name,
+                    disclosures=actual,
+                    companies=actual_companies,
+                    unlinked_disclosures=actual_unlinked,
+                )
         finally:
             connection.close()
-        if actual != expected:
-            msg = (
-                "연도별 SQLite 파일의 공시 건수가 다릅니다: "
-                f"파일={shard_path}, 변환 기록={expected}, 실제 행={actual}"
-            )
-            raise ValueError(msg)
-        if actual_unlinked != expected_unlinked:
-            msg = (
-                "연도별 SQLite 파일의 회사 미연결 공시 건수가 다릅니다: "
-                f"파일={shard_path}, 변환 기록={expected_unlinked}, "
-                f"실제 행={actual_unlinked}"
-            )
-            raise ValueError(msg)
         return expected, expected_unlinked
 
     if worker_count == 1:
@@ -276,7 +425,6 @@ def _iter_sqlite_manifest_disclosure_records(
                     "acpt_no",
                     "doc_no",
                     "submitter",
-                    "source_file",
                     "source_page",
                 ]
             )
@@ -449,11 +597,11 @@ def _sqlite_badges_predicate(
         return exists_badge(f"({badge_text} != '' AND {badge_text} {comparison} ?)", [expected])
     if operator == "between":
         values = _split_operator_values(expected)
-        if len(values) < 2:
-            raise ValueError("between operator requires two values")
+        if len(values) != 2:
+            raise ValueError("between operator requires exactly two values")
         return exists_badge(
             f"({badge_text} != '' AND {badge_text} BETWEEN ? AND ?)",
-            values[:2],
+            values,
         )
     if operator == "exists":
         return exists_badge(f"{badge_text} != ''", [])
@@ -546,10 +694,10 @@ def _sqlite_title_filter_expression(
             parameters.append(expected)
         elif operator == "between":
             values = _split_operator_values(expected)
-            if len(values) < 2:
-                raise ValueError("between operator requires two values")
+            if len(values) != 2:
+                raise ValueError("between operator requires exactly two values")
             predicate = f"({actual} != '' AND {actual} BETWEEN ? AND ?)"
-            parameters.extend(values[:2])
+            parameters.extend(values)
         elif operator == "exists":
             predicate = f"{actual} != ''"
         elif operator == "empty":
@@ -634,6 +782,8 @@ def _query_sqlite_shard_titles(
     where_sql: str,
     parameters: list[str],
     cancel_check: CancelCheck | None,
+    *,
+    clean_titles: bool,
 ) -> tuple[int, list[tuple[str, int]]]:
     if cancel_check is not None and cancel_check():
         raise FilterCancelled("title search cancelled")
@@ -654,12 +804,17 @@ def _query_sqlite_shard_titles(
         if cancel_check is not None:
             connection.set_progress_handler(lambda: int(cancel_check()), 1000)
         quoted_table = _quoted_sqlite_identifier(table_name)
+        title_expression = "TRIM(COALESCE(CAST(title AS TEXT), ''))"
+        if clean_titles:
+            title_expression = f"finiq_clean_search({title_expression})"
         rows = connection.execute(
             f"""
-            SELECT title, COUNT(DISTINCT acpt_no) AS disclosure_count, MIN(id)
+            SELECT {title_expression} AS grouped_title,
+                   COUNT(DISTINCT acpt_no) AS disclosure_count,
+                   MIN(id)
             FROM {quoted_table}
             WHERE {where_sql}
-            GROUP BY title
+            GROUP BY {title_expression}
             ORDER BY MIN(id)
             """,
             parameters,
@@ -697,6 +852,10 @@ def _search_sqlite_manifest_titles(
         list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")
     )
     worker_count = _resolve_filter_workers(filter_workers, len(shards))
+    clean_titles = any(
+        block["field"] == "title" and bool(block["clean_search"])
+        for block in filter_blocks
+    )
 
     def query_shard(shard: dict[str, Any]) -> tuple[int, list[tuple[str, int]]]:
         shard_path = _resolve_sqlite_shard_path(manifest_path, shard)
@@ -710,6 +869,7 @@ def _search_sqlite_manifest_titles(
             where_sql,
             parameters,
             cancel_check,
+            clean_titles=clean_titles,
         )
 
     matched_disclosures = 0

@@ -145,7 +145,6 @@ class ParseRequest:
     html_files: list[Path]
     metadata_index: dict[str, dict[str, Any]]
     families: dict[str, dict[str, Any]]
-    limit: int | None
     skip_errors: bool
     progress_interval: int
     parallel_workers: int
@@ -581,7 +580,6 @@ def _parse_parallel_workers(value: Any, total_files: int) -> int:
 
 def _collect_html_files(
     input_directory: Path,
-    limit: int | None,
     *,
     allowed_acpt_numbers: set[str] | None = None,
 ) -> list[Path]:
@@ -623,7 +621,7 @@ def _collect_html_files(
             msg = f"duplicate HTML filename stem: {path.stem}"
             raise ValueError(msg)
         stems.add(path.stem)
-    return files[:limit] if limit is not None else files
+    return files
 
 
 def _parse_record_filters(value: Any) -> list[dict[str, Any]]:
@@ -804,7 +802,6 @@ def _build_parse_request(
         msg = "output_directory must be a directory path"
         raise ValueError(msg)
     output_path = output_directory / f"parsed-{mode}.json"
-    limit = _parse_limit(body.get("limit"))
     cancel_token = str(body.get("cancel_token") or "").strip() or None
 
     filtered_metadata_path, compressed_metadata_path = _parse_metadata_paths(body)
@@ -815,7 +812,6 @@ def _build_parse_request(
     )
     html_files = _collect_html_files(
         input_directory,
-        limit,
         allowed_acpt_numbers=allowed_acpt_numbers,
     )
     metadata_index, families = _load_html_parse_metadata(
@@ -840,7 +836,6 @@ def _build_parse_request(
         html_files=html_files,
         metadata_index=metadata_index,
         families=families,
-        limit=limit,
         skip_errors=_parse_skip_errors(body),
         progress_interval=_parse_progress_interval(body.get("progress_interval")),
         parallel_workers=_parse_parallel_workers(

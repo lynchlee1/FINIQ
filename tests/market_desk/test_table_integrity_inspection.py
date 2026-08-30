@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -44,11 +45,17 @@ def _inspection_manifest() -> dict[str, object]:
             "unlinked_disclosures": 1,
             "shards": 1,
         },
-        "pages": [{"relative_path": "20260101_20261231/page.body", "source_rows": 2}],
+        "pages": [
+            {
+                "period_start": "2026-01-01",
+                "period_end": "2026-12-31",
+                "source_page": 1,
+                "source_rows": 2,
+            }
+        ],
         "shards": [
             {
                 "year": "2026",
-                "relative_path": "2026.sqlite",
                 "disclosures": 1,
                 "unlinked_disclosures": 1,
             }
@@ -99,19 +106,28 @@ def test_table_inspection_counts_source_without_building_row_collections(
     result = table_export._inspect_source_folder_counts(
         _source_inventory(tmp_path, [first_page, second_page]),
         worker_count=2,
+        source_inputs={
+            tmp_path.resolve(): table_export._SourceFolderInput(
+                start_date=date(2025, 1, 1),
+                end_date=date(2026, 12, 31),
+                page_size=2,
+            )
+        },
     )
 
     assert result[:6] == ({"2025": (1, 0), "2026": (1, 1)}, 1, 2, 3, 1, 1)
     assert result[6] == [
         {
-            "source_file": first_page.name,
+            "period_start": "2025-01-01",
+            "period_end": "2026-12-31",
             "source_page": 1,
             "source_rows": 2,
             "written_rows": 2,
             "duplicate_rows": 0,
         },
         {
-            "source_file": second_page.name,
+            "period_start": "2025-01-01",
+            "period_end": "2026-12-31",
             "source_page": 2,
             "source_rows": 1,
             "written_rows": 0,
@@ -136,7 +152,11 @@ def test_table_inspection_rejects_missing_source_page(
     monkeypatch.setattr(
         table_export,
         "validate_kind_workflow_input_snapshot",
-        lambda _metadata: None,
+        lambda _metadata: {
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "page_size": 100,
+        },
     )
 
     result = table_export.inspect_disclosure_table_payload(
@@ -158,7 +178,14 @@ def test_table_inspection_confirms_source_manifest_and_shards(
     source_path = tmp_path / "01-list"
     source_path.mkdir()
     page_path = source_path / "20260101_20261231" / "page.body"
-    pages = [{"relative_path": "20260101_20261231/page.body", "source_rows": 2}]
+    pages = [
+        {
+            "period_start": "2026-01-01",
+            "period_end": "2026-12-31",
+            "source_page": 1,
+            "source_rows": 2,
+        }
+    ]
 
     inventory = _source_inventory(source_path, [page_path])
     monkeypatch.setattr(
@@ -227,7 +254,14 @@ def test_table_inspection_rejects_stale_manifest_summary(
             2,
             1,
             1,
-            [{"relative_path": "20260101_20261231/page.body", "source_rows": 2}],
+            [
+                {
+                    "period_start": "2026-01-01",
+                    "period_end": "2026-12-31",
+                    "source_page": 1,
+                    "source_rows": 2,
+                }
+            ],
         ),
     )
 

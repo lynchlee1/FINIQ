@@ -19,6 +19,7 @@ from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
 from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.web.features.market_data.service_sources import (
+    _disclosure_index_specs,
     _load_sqlite_manifest,
     _parse_source_body_page_file,
     _sqlite_manifest_content_fingerprints,
@@ -26,7 +27,7 @@ from finiq.market_desk.web.features.market_data.service_sources import (
     _validate_sqlite_manifest_counts,
 )
 
-TABLE_SCHEMA_VERSION = 3
+TABLE_SCHEMA_VERSION = 4
 DEFAULT_TABLE_NAME = "disclosures"
 MANIFEST_FORMAT = "finiq_disclosure_table_manifest_v1"
 MANIFEST_FILENAME = "sqlite_manifest.json"
@@ -41,6 +42,31 @@ class _SourceInventory:
     body_paths_by_folder: dict[Path, tuple[Path, ...]]
     page_number_by_path: dict[Path, int]
     page_count_by_folder: dict[Path, int]
+
+
+@dataclass(frozen=True)
+class _SourceFolderInput:
+    start_date: date
+    end_date: date
+    page_size: int
+
+
+def _manifest_page_record(
+    *,
+    source_input: _SourceFolderInput,
+    source_page: int,
+    source_rows: int,
+    written_rows: int,
+    duplicate_rows: int,
+) -> dict[str, Any]:
+    return {
+        "period_start": source_input.start_date.isoformat(),
+        "period_end": source_input.end_date.isoformat(),
+        "source_page": source_page,
+        "source_rows": source_rows,
+        "written_rows": written_rows,
+        "duplicate_rows": duplicate_rows,
+    }
 
 
 def _date_part(value: object) -> str:
@@ -62,6 +88,26 @@ def _validated_disclosed_date(value: object) -> str:
             f"{value!r}"
         )
     return disclosed_date
+
+
+def _validated_source_disclosed_date(
+    value: object,
+    *,
+    body_path: Path,
+    source_input: _SourceFolderInput | None,
+) -> str:
+    disclosed_date = _validated_disclosed_date(value)
+    if source_input is None:
+        return disclosed_date
+    parsed_disclosed_date = date.fromisoformat(disclosed_date)
+    if source_input.start_date <= parsed_disclosed_date <= source_input.end_date:
+        return disclosed_date
+    raise ValueError(
+        f"{body_path}: 공시일 {disclosed_date}이 "
+        f"kind_workflow.input.json 요청 기간 "
+        f"{source_input.start_date.isoformat()}~"
+        f"{source_input.end_date.isoformat()} 밖에 있습니다."
+    )
 
 
 def _normalize_table_name(value: object) -> str:
@@ -154,6 +200,7 @@ def _collect_source_folder_rows_by_year(
     inventory: _SourceInventory,
     cancel_check: Callable[[], bool] | None = None,
     worker_count: int = 1,
+    source_inputs: dict[Path, _SourceFolderInput] | None = None,
 ) -> tuple[
     dict[str, list[dict[str, Any]]],
     int,
@@ -171,7 +218,6 @@ def _collect_source_folder_rows_by_year(
     source_row_count = 0
     duplicate_row_count = 0
     unlinked_disclosure_count = 0
-    source_folder = inventory.source_path
     body_paths = inventory.body_paths
     source_pagination: dict[Path, tuple[int, int]] = {}
     source_rows_by_folder: dict[Path, int] = {}
@@ -209,6 +255,8 @@ def _collect_source_folder_rows_by_year(
         _validate_source_page_pagination(
             body_path,
             paging,
+            actual_rows=len(records),
+            source_input=(source_inputs or {}).get(body_path.parent.resolve()),
             page_number_by_path=inventory.page_number_by_path,
             page_count_by_folder=inventory.page_count_by_folder,
             source_pagination=source_pagination,
@@ -219,14 +267,18 @@ def _collect_source_folder_rows_by_year(
         for record in records:
             source_row_count += 1
             page_source_rows += 1
+            disclosed_at = record.get("disclosed_at")
+            disclosed_date = _validated_source_disclosed_date(
+                disclosed_at,
+                body_path=body_path,
+                source_input=(source_inputs or {}).get(body_path.parent.resolve()),
+            )
             acpt_no = str(record.get("acpt_no") or "").strip()
             if acpt_no in seen_acpt_nos:
                 duplicate_row_count += 1
                 page_duplicate_rows += 1
                 continue
             seen_acpt_nos.add(acpt_no)
-            disclosed_at = record.get("disclosed_at")
-            disclosed_date = _validated_disclosed_date(disclosed_at)
             row = {
                 "row_no": record.get("row_no"),
                 "company_key": record.get("company_key"),
@@ -251,7 +303,6 @@ def _collect_source_folder_rows_by_year(
                 "acpt_no": acpt_no,
                 "doc_no": record.get("doc_no"),
                 "submitter": record.get("submitter"),
-                "source_file": record.get("source_file"),
                 "source_page": record.get("source_page"),
             }
             company_key = str(row.get("company_key") or "").strip()
@@ -267,14 +318,17 @@ def _collect_source_folder_rows_by_year(
             source_rows_by_folder.get(folder, 0) + page_source_rows
         )
         page_number = inventory.page_number_by_path[body_path]
+        source_input = (source_inputs or {}).get(folder)
+        if source_input is None:
+            raise ValueError(f"{folder}: source request metadata is missing")
         pages.append(
-            {
-                "source_file": body_path.relative_to(source_folder).as_posix(),
-                "source_page": page_number,
-                "source_rows": page_source_rows,
-                "written_rows": page_written_rows,
-                "duplicate_rows": page_duplicate_rows,
-            }
+            _manifest_page_record(
+                source_input=source_input,
+                source_page=page_number,
+                source_rows=page_source_rows,
+                written_rows=page_written_rows,
+                duplicate_rows=page_duplicate_rows,
+            )
         )
     _validate_source_folder_row_totals(
         source_pagination,
@@ -295,6 +349,7 @@ def _inspect_source_folder_counts(
     inventory: _SourceInventory,
     *,
     worker_count: int,
+    source_inputs: dict[Path, _SourceFolderInput] | None = None,
 ) -> tuple[
     dict[str, tuple[int, int]],
     int,
@@ -313,7 +368,6 @@ def _inspect_source_folder_counts(
     source_row_count = 0
     duplicate_row_count = 0
     unlinked_disclosure_count = 0
-    source_folder = inventory.source_path
     body_paths = inventory.body_paths
     source_pagination: dict[Path, tuple[int, int]] = {}
     source_rows_by_folder: dict[Path, int] = {}
@@ -349,6 +403,8 @@ def _inspect_source_folder_counts(
         _validate_source_page_pagination(
             body_path,
             paging,
+            actual_rows=len(records),
+            source_input=(source_inputs or {}).get(body_path.parent.resolve()),
             page_number_by_path=inventory.page_number_by_path,
             page_count_by_folder=inventory.page_count_by_folder,
             source_pagination=source_pagination,
@@ -359,6 +415,11 @@ def _inspect_source_folder_counts(
         for record in records:
             source_row_count += 1
             page_source_rows += 1
+            disclosed_date = _validated_source_disclosed_date(
+                record.get("disclosed_at"),
+                body_path=body_path,
+                source_input=(source_inputs or {}).get(body_path.parent.resolve()),
+            )
             acpt_no = str(record.get("acpt_no") or "").strip()
             if acpt_no in seen_acpt_nos:
                 duplicate_row_count += 1
@@ -374,9 +435,7 @@ def _inspect_source_folder_counts(
 
             year = _row_year(
                 {
-                    "disclosed_date": _validated_disclosed_date(
-                        record.get("disclosed_at")
-                    )
+                    "disclosed_date": disclosed_date
                 }
             )
             disclosures, unlinked = shard_counts.get(year, (0, 0))
@@ -391,14 +450,17 @@ def _inspect_source_folder_counts(
         source_rows_by_folder[folder] = (
             source_rows_by_folder.get(folder, 0) + page_source_rows
         )
+        source_input = (source_inputs or {}).get(folder)
+        if source_input is None:
+            raise ValueError(f"{folder}: source request metadata is missing")
         pages.append(
-            {
-                "source_file": body_path.relative_to(source_folder).as_posix(),
-                "source_page": inventory.page_number_by_path[body_path],
-                "source_rows": page_source_rows,
-                "written_rows": page_written_rows,
-                "duplicate_rows": page_duplicate_rows,
-            }
+            _manifest_page_record(
+                source_input=source_input,
+                source_page=inventory.page_number_by_path[body_path],
+                source_rows=page_source_rows,
+                written_rows=page_written_rows,
+                duplicate_rows=page_duplicate_rows,
+            )
         )
 
     _validate_source_folder_row_totals(
@@ -436,6 +498,8 @@ def _validate_source_page_pagination(
     body_path: Path,
     paging: dict[str, int],
     *,
+    actual_rows: int,
+    source_input: _SourceFolderInput | None,
     page_number_by_path: dict[Path, int],
     page_count_by_folder: dict[Path, int],
     source_pagination: dict[Path, tuple[int, int]],
@@ -465,6 +529,30 @@ def _validate_source_page_pagination(
             f"{folder}: BODY 페이지 사이의 전체 페이지 수 또는 "
             "전체 공시 건수가 다릅니다."
         )
+    if source_input is not None:
+        if current_page < 1 or total_pages < 1 or current_page > total_pages:
+            raise ValueError(
+                f"{body_path}: 유효하지 않은 페이지네이션입니다: "
+                f"current_page={current_page}, total_pages={total_pages}"
+            )
+        if current_page < total_pages:
+            expected_rows = source_input.page_size
+        else:
+            expected_rows = total_items - (
+                source_input.page_size * (total_pages - 1)
+            )
+        if expected_rows < 0 or expected_rows > source_input.page_size:
+            raise ValueError(
+                f"{body_path.parent}: pagination 전체 건수 {total_items}건과 "
+                f"전체 페이지 수 {total_pages}페이지가 kind_workflow.input.json의 "
+                f"page_size 값 {source_input.page_size}과 맞지 않습니다."
+            )
+        if actual_rows != expected_rows:
+            raise ValueError(
+                f"{body_path}: 실제 공시 행 수 {actual_rows}건과 "
+                f"kind_workflow.input.json page_size 기준 기대값 "
+                f"{expected_rows}건이 다릅니다."
+            )
 
 
 def _validate_source_folder_row_totals(
@@ -485,7 +573,8 @@ def _validate_source_inventory(
     inventory: _SourceInventory,
     *,
     cancel_check: Callable[[], bool] | None,
-) -> None:
+) -> dict[Path, _SourceFolderInput]:
+    source_inputs: dict[Path, _SourceFolderInput] = {}
     for folder in inventory.source_folders:
         if cancel_check and cancel_check():
             raise RuntimeError("Job cancelled")
@@ -493,8 +582,9 @@ def _validate_source_inventory(
         if not metadata_path.is_file():
             raise ValueError(f"{folder}: kind_workflow.input.json metadata is missing")
         try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            validate_kind_workflow_input_snapshot(metadata)
+            metadata = validate_kind_workflow_input_snapshot(
+                json.loads(metadata_path.read_text(encoding="utf-8"))
+            )
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
             raise ValueError(
                 f"{folder}: kind_workflow.input.json metadata is invalid: {error}"
@@ -505,6 +595,23 @@ def _validate_source_inventory(
             raise ValueError(
                 f"{folder}: kind_workflow.input.json이 있지만 공시 결과 페이지가 없습니다."
             )
+
+        start_date = date.fromisoformat(str(metadata["start_date"]))
+        end_date = date.fromisoformat(str(metadata["end_date"]))
+        expected_folder_name = (
+            f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        )
+        if folder.name != expected_folder_name:
+            raise ValueError(
+                f"{folder}: 기간 폴더명이 kind_workflow.input.json 요청 기간과 "
+                f"다릅니다. 기대 폴더명={expected_folder_name}"
+            )
+        source_inputs[folder] = _SourceFolderInput(
+            start_date=start_date,
+            end_date=end_date,
+            page_size=int(metadata["page_size"]),
+        )
+
         page_numbers: dict[int, int] = {}
         for path in page_paths:
             page_number = inventory.page_number_by_path[path]
@@ -524,6 +631,7 @@ def _validate_source_inventory(
                 f"{folder}: 페이지 번호가 1부터 연속적이지 않습니다. "
                 f"확인된 페이지: {actual_pages}"
             )
+    return source_inputs
 
 
 def _resolve_shard_workers(value: object, shard_count: int) -> int:
@@ -560,7 +668,6 @@ def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) ->
             acpt_no TEXT,
             doc_no TEXT,
             submitter TEXT,
-            source_file TEXT,
             source_page INTEGER
         )
         """
@@ -569,17 +676,15 @@ def _create_disclosure_table(connection: sqlite3.Connection, table_name: str) ->
 
 def _create_indexes(connection: sqlite3.Connection, table_name: str) -> list[str]:
     quoted_table = f'"{table_name}"'
-    index_specs = {
-        f"idx_{table_name}_date": "disclosed_date DESC",
-        f"idx_{table_name}_company": "company_name",
-        f"idx_{table_name}_company_id": "company_id",
-        f"idx_{table_name}_acpt_no": "acpt_no",
-        f"idx_{table_name}_market": "market",
-        f"idx_{table_name}_title": "title",
-    }
+    index_specs = _disclosure_index_specs(table_name)
     created: list[str] = []
     for index_name, columns in index_specs.items():
-        connection.execute(f'CREATE INDEX "{index_name}" ON {quoted_table} ({columns})')
+        column_sql = ", ".join(f'"{column}"' for column in columns)
+        if columns == ("disclosed_date",):
+            column_sql += " DESC"
+        connection.execute(
+            f'CREATE INDEX "{index_name}" ON {quoted_table} ({column_sql})'
+        )
         created.append(index_name)
     return created
 
@@ -611,7 +716,6 @@ def _create_fts_table(connection: sqlite3.Connection, table_name: str) -> bool:
 def _write_metadata(
     connection: sqlite3.Connection,
     *,
-    source_path: Path,
     source_type: str,
     table_name: str,
     companies: int,
@@ -633,7 +737,6 @@ def _write_metadata(
         "format": "finiq_disclosure_table_sqlite",
         "shard_format": SQLITE_FORMAT,
         "schema_version": str(TABLE_SCHEMA_VERSION),
-        "source_path": str(source_path),
         "source_type": source_type,
         "table_name": table_name,
         "shard_year": shard_year,
@@ -652,7 +755,6 @@ def _write_sqlite_shard(
     *,
     shard_path: Path,
     rows: list[dict[str, Any]],
-    source_path: Path,
     source_type: str,
     table_name: str,
     shard_year: str,
@@ -696,7 +798,6 @@ def _write_sqlite_shard(
                     acpt_no,
                     doc_no,
                     submitter,
-                    source_file,
                     source_page
                 )
                 VALUES (
@@ -719,7 +820,6 @@ def _write_sqlite_shard(
                     :acpt_no,
                     :doc_no,
                     :submitter,
-                    :source_file,
                     :source_page
                 )
                 """,
@@ -738,7 +838,6 @@ def _write_sqlite_shard(
                 raise ValueError(msg)
             _write_metadata(
                 connection,
-                source_path=source_path,
                 source_type=source_type,
                 table_name=table_name,
                 companies=len(company_keys),
@@ -753,7 +852,6 @@ def _write_sqlite_shard(
     temporary_path.replace(shard_path)
     return {
         "year": shard_year,
-        "relative_path": shard_path.name,
         "companies": len(company_keys),
         "disclosures": len(rows),
         "unlinked_disclosures": unlinked_disclosures,
@@ -780,12 +878,16 @@ def _publish_sqlite_generation(
     shards: list[dict[str, Any]],
 ) -> list[str]:
     shard_root = manifest_path.parent
-    shard_names = [str(shard.get("relative_path") or "") for shard in shards]
+    shard_names = [
+        f"{str(shard.get('year') or '').strip()}.sqlite" for shard in shards
+    ]
     if any(
-        not name or Path(name).name != name or not name.endswith(".sqlite")
+        len(name) != len("YYYY.sqlite")
+        or not name[:4].isdigit()
+        or name[4:] != ".sqlite"
         for name in shard_names
     ):
-        raise ValueError("staged SQLite shard paths must be SQLite file names")
+        raise ValueError("staged SQLite shard years must be four digits")
     staged_manifest = staged_root / MANIFEST_FILENAME
     staged_shards = [staged_root / name for name in shard_names]
     if not staged_manifest.is_file() or any(
@@ -851,7 +953,6 @@ def _write_sqlite_shards(
     *,
     rows_by_year: dict[str, list[dict[str, Any]]],
     shard_root: Path,
-    source_path: Path,
     source_type: str,
     table_name: str,
     worker_count: int,
@@ -873,7 +974,6 @@ def _write_sqlite_shards(
                 _write_sqlite_shard(
                     shard_path=shard_path,
                     rows=shard_rows,
-                    source_path=source_path,
                     source_type=source_type,
                     table_name=table_name,
                     shard_year=year,
@@ -903,7 +1003,6 @@ def _write_sqlite_shards(
                     _write_sqlite_shard,
                     shard_path=shard_path,
                     rows=shard_rows,
-                    source_path=source_path,
                     source_type=source_type,
                     table_name=table_name,
                     shard_year=year,
@@ -962,7 +1061,7 @@ def build_disclosure_table_payload(
 
     metadata_started_at = time.monotonic()
     source_body_paths = source_inventory.body_paths
-    _validate_source_inventory(
+    source_inputs = _validate_source_inventory(
         source_inventory,
         cancel_check=cancel_check,
     )
@@ -987,6 +1086,7 @@ def build_disclosure_table_payload(
         source_inventory,
         cancel_check=cancel_check,
         worker_count=source_workers,
+        source_inputs=source_inputs,
     )
     if source_row_count != row_count + duplicate_row_count:
         msg = (
@@ -1020,7 +1120,6 @@ def build_disclosure_table_payload(
         shards = _write_sqlite_shards(
             rows_by_year=rows_by_year,
             shard_root=staged_root,
-            source_path=source_path,
             source_type=source_type,
             table_name=table_name,
             worker_count=shard_workers,
@@ -1123,12 +1222,16 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             cancel_check=None,
         )
         source_path = source_inventory.source_path
-        _validate_source_inventory(source_inventory, cancel_check=None)
+        source_inputs = _validate_source_inventory(
+            source_inventory,
+            cancel_check=None,
+        )
         manifest = _load_sqlite_manifest(manifest_path)
         _validate_sqlite_manifest_counts(
             manifest_path,
             manifest,
             filter_workers=body.get("table_workers"),
+            validate_structure=True,
         )
         actual_content_fingerprint = _sqlite_manifest_content_fingerprints(
             manifest_path,
@@ -1157,6 +1260,7 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
         ) = _inspect_source_folder_counts(
             source_inventory,
             worker_count=source_workers,
+            source_inputs=source_inputs,
         )
 
         expected_summary = {

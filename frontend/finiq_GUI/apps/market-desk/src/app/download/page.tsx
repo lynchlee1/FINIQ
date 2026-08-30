@@ -43,7 +43,7 @@ export const areDisclosureGroupsMatching = (g1: Record<string, string[]>, g2: Re
     for (const key of Object.keys(groups).sort()) {
       const vals = groups[key] || [];
       if (vals.length > 0) {
-        obj[key] = [...vals].sort();
+        obj[key] = [...new Set(vals)].sort();
       }
     }
     return JSON.stringify(obj);
@@ -100,7 +100,7 @@ const checkExistingPayloadKey = (payload: DownloadExistingPayload) => JSON.strin
     Object.entries(payload.disclosure_type_groups)
       .filter(([, values]) => values.length > 0)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, values]) => [key, [...values].sort()])
+      .map(([key, values]) => [key, [...new Set(values)].sort()])
   ),
 });
 
@@ -135,6 +135,7 @@ export default function DownloadPage() {
   const [runStarting, setRunStarting] = useState(false);
   const activeInspectionRef = useRef<DownloadInspectionContext | null>(readStoredInspectionContext());
   const cleanupCandidatePayloadRef = useRef<DownloadPayload | null>(null);
+  const cleanupDeletionConfirmationRef = useRef<string | null>(null);
   const [cleanupCandidateKey, setCleanupCandidateKey] = useState<string | null>(null);
   const [lastInspectionCandidateCount, setLastInspectionCandidateCount] = useState(0);
   const [lastInspectedMetadataKey, setLastInspectedMetadataKey] = useState<string | null>(null);
@@ -158,6 +159,7 @@ export default function DownloadPage() {
 
   const clearCleanupCandidates = useCallback(() => {
     cleanupCandidatePayloadRef.current = null;
+    cleanupDeletionConfirmationRef.current = null;
     setCleanupCandidateKey(null);
     setLastInspectionCandidateCount(0);
     setDeleteConfirmed(false);
@@ -193,7 +195,7 @@ export default function DownloadPage() {
         const verified = data.existing_downloads as DownloadExistingResponse | null | undefined;
         if (verified) acceptExistingInspectionResult(verified);
         const hasVerificationFailure = !verified || (verified.ranges?.some(
-          (range) => range.status === "stale"
+          (range) => range.status !== "validated"
             || range.filters_match === false
             || range.metadata_status === "mismatch"
         ) ?? false);
@@ -204,6 +206,7 @@ export default function DownloadPage() {
         setLastInspectionCandidateCount(candidateCount);
         if (candidateCount > 0 && data.dry_run) {
           cleanupCandidatePayloadRef.current = completedPayload;
+          cleanupDeletionConfirmationRef.current = String(data.deletion_confirmation || "");
           setCleanupCandidateKey(completedInspectionKey);
         } else {
           clearCleanupCandidates();
@@ -273,8 +276,6 @@ export default function DownloadPage() {
   const [workerCount, setWorkerCount] = useState("1");
   const [parallelStrategy, setParallelStrategy] = useState<"years" | "pages">("years");
   const [jobRetentionInput, setJobRetentionInput] = useState("60");
-  const [startPage, setStartPage] = useState("1");
-  const [endPage, setEndPage] = useState("");
   const [lastReportOnly, setLastReportOnly] = useState(false);
   const [logLimit, setLogLimit] = useState("20");
   const [selectedDisclosures, setSelectedDisclosures] = useState<Record<string, string[]>>({});
@@ -456,8 +457,6 @@ export default function DownloadPage() {
     worker_count: Number(workerCount),
     parallel_strategy: parallelStrategy,
     log_limit: Number(logLimit),
-    start_page: Number(startPage),
-    end_page: endPage ? Number(endPage) : null,
     last_report_only: lastReportOnly,
     disclosure_type_groups: selectedDisclosures,
   });
@@ -484,7 +483,7 @@ export default function DownloadPage() {
     }
   };
 
-  const startDownloadJob = async (payload: DownloadPayload, inspectionJobId?: string) => {
+  const startDownloadJob = async (payload: DownloadPayload, inspectionJobId: string) => {
     const data = await startDownload(payload, inspectionJobId);
     setPreviewResult(null);
     setResult(null);
@@ -532,6 +531,9 @@ export default function DownloadPage() {
         dry_run: dryRun,
         delete_confirmed: deleteConfirmed,
         delete_confirmation_text: deleteConfirmationText,
+        ...(!dryRun && cleanupDeletionConfirmationRef.current
+          ? { deletion_confirmation: cleanupDeletionConfirmationRef.current }
+          : {}),
       }, abortController.signal);
       if (data.job_id !== inspectionJobId) {
         throw new Error("검사 작업 ID가 요청과 일치하지 않습니다.");
@@ -701,7 +703,7 @@ export default function DownloadPage() {
       setPreviewResult(null);
       const currentKey = checkExistingPayloadKey(existingPayloadFromDownloadPayload(buildPayload()));
       const payload = cleanupCandidatePayloadRef.current;
-      if (!payload || cleanupCandidateKey !== currentKey) {
+      if (!payload || !cleanupDeletionConfirmationRef.current || cleanupCandidateKey !== currentKey) {
         throw new Error("현재 조건과 일치하는 삭제 예정 파일 검사가 없습니다. 같은 조건으로 다시 검사해 주세요.");
       }
       await inspectExistingFiles(false, payload);
@@ -1381,12 +1383,6 @@ export default function DownloadPage() {
                     <p className="text-caption font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">작업 범위</p>
                   </div>
                   <div className="space-y-2">
-                    <HtmlInspectorField label="시작 페이지">
-                      <Input type="number" value={startPage} onChange={(e) => setStartPage(e.target.value)} className={htmlInspectorControlClassName} />
-                    </HtmlInspectorField>
-                    <HtmlInspectorField label="종료 페이지">
-                      <Input type="number" placeholder="전체" value={endPage} onChange={(e) => setEndPage(e.target.value)} className={htmlInspectorControlClassName} />
-                    </HtmlInspectorField>
                     <HtmlInspectorField label="최종보고서만">
                       <HtmlInspectorToggle checked={lastReportOnly} onCheckedChange={setLastReportOnly} />
                     </HtmlInspectorField>

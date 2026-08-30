@@ -302,7 +302,6 @@ export default function HtmlParsePage() {
   const [outputDirectory, setOutputDirectory] = useState("");
   const [parserMethod, setParserMethod] = useState("");
   const [parserMethods, setParserMethods] = useState<ParserMethodConfig[]>([]);
-  const [limit, setLimit] = useState("");
   const [skipErrors, setSkipErrors] = useState(true);
   const [progressInterval, setProgressInterval] = useState("1000");
   const [parallelWorkers, setParallelWorkers] = useState("");
@@ -417,7 +416,6 @@ export default function HtmlParsePage() {
     conditions,
     dataRoot,
     inputDirectory,
-    limit,
     outputDirectory,
     parallelWorkers,
     parserMethod,
@@ -587,7 +585,6 @@ export default function HtmlParsePage() {
     mode: currentFilterMode,
     parser_method: parserMethod,
     ...filterIdentityPayload,
-    limit: limit ? Number(limit) : null,
     skip_errors: skipErrors,
     progress_interval: Number(progressInterval),
     parallel_workers: parallelWorkers ? Number(parallelWorkers) : null,
@@ -602,7 +599,6 @@ export default function HtmlParsePage() {
     parserMethod,
     currentFilterMode,
     currentParentMode,
-    limit,
     skipErrors,
     progressInterval,
     parallelWorkers,
@@ -830,16 +826,6 @@ export default function HtmlParsePage() {
   ];
 
   const parseOptionFields: HtmlWorkflowField[] = [
-    {
-      id: "limit",
-      kind: "input",
-      type: "number",
-      label: SETTINGS_LABELS.maxItems,
-      placeholder: "전체",
-      value: limit,
-      onChange: setLimit,
-      span: 2,
-    },
     {
       id: "progressInterval",
       kind: "input",

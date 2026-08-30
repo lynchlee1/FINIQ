@@ -36,7 +36,8 @@ test("derived disclosure filters keep parent and child identities separate", asy
   assert.match(page, /identityControls=\{/);
   assert.match(page, /libraryPresets=\{presets\}/);
   assert.doesNotMatch(page, /기본 필터는 02단계 전체를 검색하고 이후 HTML을 이 필터가 소유합니다/);
-  assert.match(page, /파생 필터는 완료된 상위 필터 결과에만 조건을 추가하며, 한 단계까지만 만들 수 있습니다/);
+  assert.match(page, /최종 결과는 상위 필터를 벗어나지 않습니다/);
+  assert.match(page, /OR 조건을 추가하면 파생 조건식 자체가 예상보다 넓어질 수 있으니/);
   assert.doesNotMatch(page, /필터 구조/);
   assert.doesNotMatch(page, /필터 유형/);
   assert.doesNotMatch(page, /FILTER_MODE_KEYS/);
@@ -59,7 +60,8 @@ test("derived disclosure filters keep parent and child identities separate", asy
   assert.match(card, /showPresetActions\?: boolean/);
   assert.match(card, /allowCreate=\{showPresetActions\}/);
   assert.match(card, /<FieldHelpPopover \/>/);
-  assert.match(card, /ariaLabel="파생 필터 설명" title="파생 필터 설명"/);
+  assert.match(card, /ariaLabel="파생 필터 주의사항" title="파생 필터 주의사항"/);
+  assert.match(card, /icon="info"/);
   assert.match(card, /presetSelectorHelpDescription \? <DerivedFilterHelpPopover description=\{presetSelectorHelpDescription\} \/>/);
   assert.match(card, /className="flex h-5 items-center gap-1\.5"/);
   assert.match(card, /className="inline-flex h-5 items-center leading-none dark:text-slate-300"/);

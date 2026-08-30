@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
 import uuid
@@ -48,6 +49,22 @@ KindSavedFileCallback = Callable[[Path, int | None, KindSearchFormData | None], 
 KindSavedFileValidator = Callable[[Path, int | None, KindSearchFormData | None], None]
 KindViewerSavedFileCallback = Callable[[Path, str, str | None], None]
 
+_KIND_DISCLOSURE_TABLE_FRAGMENT_RE = re.compile(
+    r"<table\b[^>]*\bclass\s*=\s*(['\"])table\1",
+    re.IGNORECASE,
+)
+_KIND_DISCLOSURE_TABLE_CELL_RE = re.compile(
+    r"<td\b[^>]*\bclass\s*=\s*(['\"])td\1",
+    re.IGNORECASE,
+)
+
+
+def _has_kind_disclosure_table_fragment(content: str) -> bool:
+    return (
+        _KIND_DISCLOSURE_TABLE_FRAGMENT_RE.search(content) is not None
+        and _KIND_DISCLOSURE_TABLE_CELL_RE.search(content) is not None
+    )
+
 
 def _save_response_content(output_path: Path, response: requests.Response) -> None:
     """response body를 지정한 경로에 저장한다."""
@@ -71,6 +88,7 @@ def _is_valid_html(path: Path) -> bool:
             "<html" in normalized
             or "opendisclsviewer" in normalized
             or (normalized.startswith("<p") and "<table" in normalized)
+            or _has_kind_disclosure_table_fragment(normalized)
         )
     except Exception:
         return False
