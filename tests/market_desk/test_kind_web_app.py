@@ -2572,7 +2572,7 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
     }
     final_inspection = {"passed": True, "failed_modes": [], "results": []}
     inspections = iter([initial_inspection, final_inspection])
-    downloaded_payloads: list[tuple[dict[str, object], bool, bool]] = []
+    downloaded_payloads: list[tuple[dict[str, object], bool]] = []
 
     monkeypatch.setattr(
         html_cleanup,
@@ -2591,10 +2591,9 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
         cancel_check: object = None,
         *,
         redownload_unverified_existing: bool = False,
-        confirm_source_unavailable: bool = False,
     ) -> dict[str, object]:
         downloaded_payloads.append(
-            (body, redownload_unverified_existing, confirm_source_unavailable)
+            (body, redownload_unverified_existing)
         )
         return {"cancelled": False, "requested_count": 2, "saved_count": 2}
 
@@ -2611,14 +2610,13 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
     assert result["passed"] is True
     assert result["target_mode_count"] == 2
     assert result["verification"] is final_inspection
-    assert [payload["mode"] for payload, _, _ in downloaded_payloads] == [
+    assert [payload["mode"] for payload, _ in downloaded_payloads] == [
         "bond_issuance",
         "rights_issuance",
     ]
-    assert all(repair is True for _, repair, _ in downloaded_payloads)
-    assert all(confirm is True for _, _, confirm in downloaded_payloads)
+    assert all(repair is True for _, repair in downloaded_payloads)
     assert all(
-        payload["skip_existing"] is True for payload, _, _ in downloaded_payloads
+        payload["skip_existing"] is True for payload, _ in downloaded_payloads
     )
 
 

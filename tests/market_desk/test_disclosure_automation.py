@@ -342,19 +342,17 @@ def test_stage_four_uses_official_mode_directories(
     assert compress_body["output_directory"] == str(compressed)
 
 
-def test_stage_five_uses_official_mode_directory_and_public_confirmation(
+def test_stage_five_uses_official_mode_directory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     profile = normalize_automation_profile(_profile(tmp_path))
     captured_body: dict[str, object] = {}
-    captured_kwargs: dict[str, object] = {}
 
     def download(
-        body: dict[str, object], **kwargs: object
+        body: dict[str, object], **_kwargs: object
     ) -> dict[str, object]:
         captured_body.update(body)
-        captured_kwargs.update(kwargs)
         return {"cancelled": False}
 
     monkeypatch.setattr(automation, "download_disclosure_internal_html_payload", download)
@@ -370,7 +368,6 @@ def test_stage_five_uses_official_mode_directory_and_public_confirmation(
     assert captured_body["output_directory"] == str(
         tmp_path / "05-internal-html-download" / "bond_issuance"
     )
-    assert captured_kwargs["confirm_source_unavailable"] is True
 
 
 def test_stage_six_uses_official_mode_directories(

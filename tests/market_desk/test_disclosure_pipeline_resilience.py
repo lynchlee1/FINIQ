@@ -1160,7 +1160,7 @@ def test_internal_html_invalid_response_preserves_previous_file_and_manifest(
         lambda *_args, **_kwargs: b"not html",
     )
 
-    with pytest.raises(ValueError, match="membership.*missing"):
+    with pytest.raises(ValueError, match="Downloaded internal response is invalid HTML"):
         download_disclosure_internal_html_payload(
             {**body, "skip_existing": False}
         )
@@ -1500,6 +1500,14 @@ def test_internal_html_partial_failure_preserves_previous_manifest_before_raisin
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
         fake_download,
+    )
+
+    def fail_revalidation(*_args: object, **_kwargs: object) -> bytes:
+        raise OSError("network unavailable")
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.features.disclosures.internal_html_download._fetch_internal_html",
+        fail_revalidation,
     )
     body = _internal_html_body(
         tmp_path,

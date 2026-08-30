@@ -3360,7 +3360,6 @@ def test_download_disclosure_internal_html_payload_does_not_use_legacy_compresse
     ("returned_acpt_numbers", "mismatch_name"),
     [
         (["20250101000001", "20250101000001"], "duplicates"),
-        ([], "missing"),
         (["20250101000001", "20250101000002"], "unexpected"),
     ],
 )
@@ -3407,7 +3406,7 @@ def test_download_disclosure_internal_html_payload_rejects_result_membership_mis
         )
 
 
-def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
+def test_internal_html_download_records_revalidated_kind_source_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3448,8 +3447,7 @@ def test_internal_html_redownload_records_revalidated_kind_source_unavailable(
         {
             "output_directory": str(output_directory),
             "source_compressed_json_path": str(compressed_path),
-        },
-        redownload_unverified_existing=True,
+        }
     )
 
     assert result["verification"]["passed"] is True
@@ -3715,7 +3713,7 @@ def test_failed_placeholder_refresh_reports_membership_error(
         )
 
 
-def test_internal_html_redownload_does_not_hide_revalidation_request_failure(
+def test_internal_html_download_does_not_hide_revalidation_request_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3757,8 +3755,7 @@ def test_internal_html_redownload_does_not_hide_revalidation_request_failure(
             {
                 "output_directory": str(tmp_path / "content_html"),
                 "source_compressed_json_path": str(compressed_path),
-            },
-            redownload_unverified_existing=True,
+            }
         )
 
 

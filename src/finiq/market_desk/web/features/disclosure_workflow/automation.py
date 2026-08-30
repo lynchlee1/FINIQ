@@ -1076,7 +1076,6 @@ def _run_stage(
             },
             progress_callback=progress_callback,
             cancel_check=cancel_check,
-            confirm_source_unavailable=True,
         )
         if result.get("cancelled"):
             raise RuntimeError("Job cancelled")

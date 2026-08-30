@@ -112,7 +112,6 @@ def redownload_missing_disclosure_internal_html_payload(
                     else {}
                 ),
                 redownload_unverified_existing=True,
-                confirm_source_unavailable=True,
             )
             cancelled = bool(result.get("cancelled"))
             results.append({"mode": mode, "passed": not cancelled, **result})
@@ -717,7 +716,6 @@ def download_disclosure_internal_html_payload(
     download_callback: Callable[[], None] | None = None,
     *,
     redownload_unverified_existing: bool = False,
-    confirm_source_unavailable: bool = False,
 ) -> dict[str, Any]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -1086,9 +1084,7 @@ def download_disclosure_internal_html_payload(
                 for target in download_targets
                 if target["acpt_no"] not in downloaded_acpt_numbers
             ]
-            if (
-                confirm_source_unavailable or redownload_unverified_existing
-            ) and revalidation_targets:
+            if revalidation_targets:
                 emit(
                     "다운로드 실패 대상의 KIND 원본 재검증을 시작합니다: "
                     f"{len(revalidation_targets)}건."
