@@ -19,7 +19,7 @@ export type TocItem = {
   toc_id: string;
   index: number;
   title: string;
-  kind?: "preamble" | "cover" | "part" | "section" | "document";
+  kind?: "preamble" | "correction" | "cover" | "part" | "section" | "document";
   level?: number;
   parent_toc_id?: string | null;
   is_toc?: boolean;
@@ -133,6 +133,7 @@ type HtmlSectionStructureTypesProps = {
 
 const sectionKindLabels: Record<NonNullable<TocItem["kind"]>, string> = {
   preamble: "머리말",
+  correction: "정정",
   cover: "표지",
   part: "부",
   section: "목차",

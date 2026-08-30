@@ -6098,7 +6098,7 @@ def test_split_internal_html_sections_preserves_source_toc_hierarchy() -> None:
     )
 
     assert [section.toc_id for section in sections] == [
-        "preamble",
+        "correction",
         "toc_1",
         "toc_2",
         "toc_3",
@@ -6109,7 +6109,7 @@ def test_split_internal_html_sections_preserves_source_toc_hierarchy() -> None:
         "toc_8",
     ]
     assert [section.kind for section in sections] == [
-        "preamble",
+        "correction",
         "section",
         "cover",
         "section",
@@ -6132,7 +6132,7 @@ def test_split_internal_html_sections_preserves_source_toc_hierarchy() -> None:
         "toc_7",
     ]
     assert [section.is_toc for section in sections] == [
-        False,
+        True,
         True,
         True,
         True,
@@ -7294,7 +7294,7 @@ def test_section_save_ignores_automation_cache_below_standard_input(
     assert not (output_directory / ".automation-current" / hidden.name).exists()
 
 
-def test_section_save_discards_correction_preamble_before_bond_parse(
+def test_section_save_discards_correction_toc_before_bond_parse(
     tmp_path: Path,
 ) -> None:
     input_directory = tmp_path / "05-internal-html-download"
@@ -7339,6 +7339,8 @@ def test_section_save_discards_correction_preamble_before_bond_parse(
         "주요사항보고서",
         "신주인수권부사채권 발행결정",
     ]
+    assert split_sections[0].kind == "correction"
+    assert split_sections[0].is_toc is True
 
     save_disclosure_html_sections_payload(
         {
@@ -7409,7 +7411,7 @@ def test_section_save_never_discards_correction_word_after_first_section(
     assert "두 번째 본문" in output
 
 
-def test_section_save_removes_direct_text_correction_preamble(tmp_path: Path) -> None:
+def test_section_save_preserves_direct_text_correction_preamble(tmp_path: Path) -> None:
     input_directory = tmp_path / "input"
     source_file = input_directory / "2026" / "20260828000001.html"
     source_file.parent.mkdir(parents=True)
@@ -7431,10 +7433,12 @@ def test_section_save_removes_direct_text_correction_preamble(tmp_path: Path) ->
         encoding="utf-8"
     )
 
-    assert result["summary"]["removed_correction_sections"] == 1
-    assert result["section_patterns"][0]["sections"][0]["will_remove"] is True
+    assert result["summary"]["removed_correction_sections"] == 0
+    assert result["section_patterns"][0]["sections"][0]["kind"] == "preamble"
+    assert result["section_patterns"][0]["sections"][0]["is_toc"] is False
+    assert result["section_patterns"][0]["sections"][0]["will_remove"] is False
     assert result["section_patterns"][0]["sections"][1]["will_remove"] is False
-    assert "정정 신고" not in output
+    assert "정정 신고" in output
     assert "업무 본문" in output
     assert "본문 내용" in output
 

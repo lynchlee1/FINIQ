@@ -17,7 +17,7 @@ test("HTML section save runs automatically without TOC pattern decisions", async
 test("HTML section preview preserves and indents structural TOC hierarchy", async () => {
   const source = await readFile(resultsPath, "utf8");
 
-  assert.match(source, /kind\?: "preamble" \| "cover" \| "part" \| "section" \| "document"/);
+  assert.match(source, /kind\?: "preamble" \| "correction" \| "cover" \| "part" \| "section" \| "document"/);
   assert.match(source, /parent_toc_id\?: string \| null/);
   assert.match(source, /is_toc\?: boolean/);
   assert.match(source, /Math\.max\(0, section\.level \|\| 0\) \* 16/);

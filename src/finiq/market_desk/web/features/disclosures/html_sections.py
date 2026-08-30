@@ -29,7 +29,6 @@ ProgressCallback = Callable[[str], None]
 _SOURCE_TOC_ID_RE = re.compile(r"^toc_(\d+)$", flags=re.IGNORECASE)
 _HEADING_TAGS = {f"h{level}" for level in range(1, 7)}
 # Post-split classification only; structural boundary detection must not use text.
-_CORRECTION_TITLE_TOKEN = "정정"
 _SECTIONS_STAGE_NAME = "06-sections"
 DEFAULT_HTML_SECTION_PAGE_SIZE = 20
 DEFAULT_HTML_SECTION_PROBLEM_REPORT_LIMIT = 50
@@ -142,6 +141,8 @@ def _toc_element_role(element: etree._Element) -> tuple[str, int] | None:
     roles: list[tuple[str, int]] = []
     if "COVER-TITLE" in class_names:
         roles.append(("cover", 0))
+    if "CORRECTION" in class_names:
+        roles.append(("correction", 0))
     if "PART" in class_names:
         roles.append(("part", 0))
     roles.extend(
@@ -166,7 +167,7 @@ def _is_section_paragraph(element: etree._Element) -> bool:
     if not isinstance(element.tag, str) or element.tag.lower() != "p":
         return False
     role = _toc_element_role(element)
-    return role is not None and role[0] == "section"
+    return role is not None and role[0] in {"correction", "section"}
 
 
 def _has_class(element: etree._Element, class_name: str) -> bool:
@@ -188,6 +189,15 @@ def _section_container_and_boundaries(
         for position, child in enumerate(body_children)
         if _SOURCE_TOC_ID_RE.fullmatch(str(child.get("id") or "")) is not None
     ]
+    correction_paragraphs = [
+        (position, child)
+        for position, child in enumerate(body_children)
+        if _is_section_paragraph(child)
+        and (_toc_element_role(child) or ("", 0))[0] == "correction"
+        and _SOURCE_TOC_ID_RE.fullmatch(str(child.get("id") or "")) is None
+    ]
+    if len(correction_paragraphs) > 1:
+        raise ValueError("one correction TOC boundary is required")
     if source_toc_elements:
         if xforms_wrappers:
             raise ValueError("one unambiguous TOC structure is required")
@@ -208,6 +218,19 @@ def _section_container_and_boundaries(
                     is_toc=True,
                 )
             )
+        if correction_paragraphs:
+            position, element = correction_paragraphs[0]
+            boundaries.append(
+                _HtmlTocBoundary(
+                    position=position,
+                    element=element,
+                    toc_id="correction",
+                    kind="correction",
+                    level=0,
+                    is_toc=True,
+                )
+            )
+            boundaries.sort(key=lambda boundary: boundary.position)
         if source_numbers != sorted(set(source_numbers)):
             raise ValueError("source TOC ids must be unique and ascending")
         unlinked_headings = [
@@ -241,6 +264,19 @@ def _section_container_and_boundaries(
                     is_toc=True,
                 )
             )
+        if correction_paragraphs:
+            position, element = correction_paragraphs[0]
+            boundaries.append(
+                _HtmlTocBoundary(
+                    position=position,
+                    element=element,
+                    toc_id="correction",
+                    kind="correction",
+                    level=0,
+                    is_toc=True,
+                )
+            )
+            boundaries.sort(key=lambda boundary: boundary.position)
         return body, boundaries, "heading"
 
     paragraph_elements = [
@@ -251,17 +287,26 @@ def _section_container_and_boundaries(
     if paragraph_elements:
         if xforms_wrappers:
             raise ValueError("one unambiguous TOC structure is required")
-        return body, [
-            _HtmlTocBoundary(
-                position=position,
-                element=element,
-                toc_id=f"toc_{index}",
-                kind="section",
-                level=(_toc_element_role(element) or ("section", 1))[1],
-                is_toc=True,
+        section_index = 0
+        boundaries = []
+        for position, element in paragraph_elements:
+            kind, level = _toc_element_role(element) or ("section", 1)
+            if kind == "correction":
+                toc_id = "correction"
+            else:
+                section_index += 1
+                toc_id = f"toc_{section_index}"
+            boundaries.append(
+                _HtmlTocBoundary(
+                    position=position,
+                    element=element,
+                    toc_id=toc_id,
+                    kind=kind,
+                    level=level,
+                    is_toc=True,
+                )
             )
-            for index, (position, element) in enumerate(paragraph_elements, start=1)
-        ], "paragraph"
+        return body, boundaries, "paragraph"
 
     if not xforms_wrappers:
         raise _NoHtmlSectionsError("supported TOC structure is required")
@@ -337,7 +382,7 @@ def _section_plans(
             if not title:
                 raise ValueError("TOC boundary title is required")
 
-        if boundary.kind in {"cover", "document"}:
+        if boundary.kind in {"correction", "cover", "document"}:
             hierarchy.clear()
             parent_toc_id = None
         else:
@@ -392,14 +437,10 @@ def _render_section_plan(
     )
 
 
-def _is_correction_section_title(title: str) -> bool:
-    return _CORRECTION_TITLE_TOKEN in re.sub(r"\s+", "", title)
-
-
 def _leading_correction_plan(
     plans: list[_HtmlSectionPlan],
 ) -> _HtmlSectionPlan | None:
-    if len(plans) > 1 and _is_correction_section_title(plans[0].title):
+    if len(plans) > 1 and plans[0].is_toc and plans[0].kind == "correction":
         return plans[0]
     return None
 
