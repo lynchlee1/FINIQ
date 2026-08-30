@@ -6,4 +6,4 @@
 | --- | --- |
 | [시각 기반](./foundations.md) | 분위기, 색상, 타이포그래피, 간격, 동작, 표면 |
 | [컴포넌트 디자인](./components/index.md) | 공통 규칙만으로 설명할 수 없는 컴포넌트 계약 |
-| [UI 용어](./terminology.md) | 화면 명칭, 버튼명, 상태 문구 |
+| [UI 용어](./terminology/index.md) | 화면 명칭, 버튼명, 상태 문구 |

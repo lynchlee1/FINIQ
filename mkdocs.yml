@@ -44,7 +44,11 @@ nav:
           - 다운로드 실행: disclosures/01-download/download.md
           - 기존 데이터 검사: disclosures/01-download/inspection.md
           - 저장 형식: disclosures/01-download/storage.md
-      - 02 공시내역 변환: disclosures/02-table.md
+      - 02 공시내역 변환:
+          - 단계 개요: disclosures/02-table/index.md
+          - 변환과 SQLite 생성: disclosures/02-table/conversion.md
+          - 결과 무결성 검사: disclosures/02-table/inspection.md
+          - 저장 형식: disclosures/02-table/storage.md
       - 03 공시내역 필터링:
           - 단계 개요: disclosures/03-filter/index.md
           - 필터 구성: disclosures/03-filter/filtering.md
@@ -67,14 +71,21 @@ nav:
           - 처리 흐름: disclosures/06-section-split/workflow.md
           - 저장 형식: disclosures/06-section-split/storage.md
       - 07 공시원문 변환:
-          - 단계 계약: disclosures/07-html-parse/index.md
-          - 요청·저장 형식: disclosures/07-html-parse/reference.md
+          - 단계 개요: disclosures/07-html-parse/index.md
+          - 변환 실행: disclosures/07-html-parse/workflow.md
+          - 요청과 행 변환: disclosures/07-html-parse/request.md
+          - 저장 형식: disclosures/07-html-parse/storage.md
+          - 진단과 조회: disclosures/07-html-parse/diagnostics.md
           - 자산 거래: disclosures/07-html-parse/parsers/asset-transaction.md
           - 채권 발행: disclosures/07-html-parse/parsers/bond-issuance.md
           - 유상·무상증자: disclosures/07-html-parse/parsers/rights-issuance.md
           - 증권 거래: disclosures/07-html-parse/parsers/security-transaction.md
           - 주주총회: disclosures/07-html-parse/parsers/shareholder-meeting.md
-      - 08 공시 정정내역 한눈에: disclosures/08-change-log.md
+      - 08 공시 정정내역 한눈에:
+          - 단계 개요: disclosures/08-change-log/index.md
+          - 정정내역 비교: disclosures/08-change-log/comparison.md
+          - 결과 조회: disclosures/08-change-log/review.md
+          - 저장 형식: disclosures/08-change-log/storage.md
       - 09 공시 관계 그래프:
           - 단계 개요: disclosures/09-disclosure-graph/index.md
           - 그래프 구성: disclosures/09-disclosure-graph/graph.md
@@ -87,14 +98,36 @@ nav:
           - 복구: ontology/common/recovery.md
           - 검증과 중단: ontology/common/validation.md
           - 실행 환경: ontology/common/runtime.md
-      - Quantiwise: ontology/quantiwise.md
-      - Graph View: ontology/graph-view.md
-      - Chart View: ontology/chart-view.md
-      - 공시 분석: ontology/disclosure-analysis.md
+      - Quantiwise:
+          - 개요: ontology/quantiwise/index.md
+          - 복구: ontology/quantiwise/recovery.md
+          - 검증과 중단: ontology/quantiwise/validation.md
+          - 변환과 병합: ontology/quantiwise/runtime.md
+      - Graph View:
+          - 개요: ontology/graph-view/index.md
+          - 복구: ontology/graph-view/recovery.md
+          - 검증과 중단: ontology/graph-view/validation.md
+          - 그래프 동작: ontology/graph-view/behavior.md
+      - Chart View:
+          - 개요: ontology/chart-view/index.md
+          - 복구: ontology/chart-view/recovery.md
+          - 검증과 중단: ontology/chart-view/validation.md
+          - 차트 동작: ontology/chart-view/behavior.md
+      - 공시 분석:
+          - 개요: ontology/disclosure-analysis/index.md
+          - 복구: ontology/disclosure-analysis/recovery.md
+          - 검증과 중단: ontology/disclosure-analysis/validation.md
+          - 분석과 저장: ontology/disclosure-analysis/behavior.md
   - 디자인:
       - 디자인 시스템: design/index.md
       - 시각 기반: design/foundations.md
-      - UI 용어: design/terminology.md
+      - UI 용어:
+          - 원칙과 문서 안내: design/terminology/index.md
+          - 공통과 작업공간: design/terminology/common.md
+          - 공시 워크플로우: design/terminology/disclosures.md
+          - 유틸리티와 주가 데이터: design/terminology/utility.md
+          - Ontology: design/terminology/ontology.md
+          - 우측 도크: design/terminology/right-dock.md
       - 컴포넌트:
           - 공통 계약: design/components/index.md
           - 기존 데이터 검토: design/components/inspection-block.md

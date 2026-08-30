@@ -35,7 +35,7 @@ MarketDesk는 많은 데이터를 조용하고 정확하게 다루는 분석 도
 
 - 기본 글꼴은 IBM Plex Sans KR, Inter, system UI 순서다.
 - 숫자는 고정폭 숫자(`tabular-nums`)로 표시한다.
-- UI 문구는 [UI 용어](./terminology.md)를 따른다.
+- UI 문구는 [UI 용어](./terminology/index.md)를 따른다.
 
 ## 레이아웃과 표면
 

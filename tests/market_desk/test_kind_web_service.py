@@ -312,7 +312,7 @@ MIXED_RIGHTS_ISSUANCE_50_EXAMPLES = [
     "2010/20101004000068.html",
 ]
 HTML_PARSE_MODES_DOC = (
-    REPO_ROOT / "docs" / "disclosures" / "07-html-parse" / "modes" / "README.md"
+    REPO_ROOT / "docs" / "disclosures" / "07-html-parse" / "index.md"
 )
 GUI_APP_DIR = REPO_ROOT / "frontend" / "finiq_GUI" / "apps" / "market-desk" / "src" / "app"
 GUI_EXTERNAL_HTML_DOWNLOAD_PAGE = GUI_APP_DIR / "external-html-download" / "page.tsx"

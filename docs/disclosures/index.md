@@ -9,13 +9,13 @@ FINIQ의 공시 처리는 01~07단계를 순서대로 실행한 뒤, 07단계 �
 | 단계 | 책임 | 주요 출력 | 문서 |
 | --- | --- | --- | --- |
 | 01 | KIND 조건검색 결과 다운로드 | `01-list` 원본과 실행 metadata | [01 공시내역 다운로드](01-download/index.md) |
-| 02 | 원본을 검색 가능한 SQLite로 변환 | `02-table/<YYYY>.sqlite` | [02 공시내역 변환](02-table.md) |
+| 02 | 원본을 검색 가능한 SQLite로 변환 | `02-table/<YYYY>.sqlite` | [02 공시내역 변환](02-table/index.md) |
 | 03 | 공시와 파생 filter의 membership 결정 | `03-filter/<mode>/filtered.json` | [03 공시내역 필터링](03-filter/index.md) |
 | 04 | 외부 HTML 저장과 문서 선택 정보 압축 | `04-external-html-*` | [04 공시원문 외부 저장](04-external-html/index.md) |
 | 05 | 선택한 KIND 본문 HTML 저장 | `05-internal-html-download` | [05 공시원문 내부 저장](05-internal-html/index.md) |
 | 06 | 본문을 목차 단위 HTML로 분리 | `06-sections` | [06 공시원문 목차 분리](06-section-split/index.md) |
 | 07 | 공시 유형별 parser로 구조화 | `07-converted` | [07 공시원문 변환](07-html-parse/index.md) |
-| 08 | 정정공시 문서 사이의 변경 계산 | 변경 내역 조회 결과 | [08 공시 정정내역 한눈에](08-change-log.md) |
+| 08 | 정정공시 문서 사이의 변경 계산 | 변경 내역 조회 결과 | [08 공시 정정내역 한눈에](08-change-log/index.md) |
 | 09 | 공시 주체와 관계를 그래프로 구성 | `09-disclosure-graph` | [09 공시 관계 그래프](09-disclosure-graph/index.md) |
 
 작업공간, 식별자, 단계 연결, 공통 복구 규칙은 [공시 처리 공통 계약](common/index.md)에서 관리한다.

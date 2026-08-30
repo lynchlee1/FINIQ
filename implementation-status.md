@@ -26,7 +26,7 @@
 - 04: 압축 JSON을 저장한 뒤 다시 읽어 파일 구조와 `records`를 검증한다. ([압축](docs/disclosures/04-external-html/compression.md))
 - 05: 저장한 HTML을 다시 판별한다. ([내부 HTML 저장](docs/disclosures/05-internal-html/download.md))
 - 06: 하나라도 저장 규칙을 만족하지 않으면 쓰기를 시작하지 않도록 전체 입력을 먼저 확인한다. ([처리 흐름](docs/disclosures/06-section-split/workflow.md))
-- 07: `skip_errors=true`일 때 `progress_interval`마다 현재 전체 결과를 중간 저장한다. ([단계 문서](docs/disclosures/07-html-parse/index.md), [설정 기준](docs/disclosures/07-html-parse/reference.md))
+- 07: `skip_errors=true`일 때 `progress_interval`마다 현재 전체 결과를 중간 저장한다. ([변환 실행](docs/disclosures/07-html-parse/workflow.md), [요청 기준](docs/disclosures/07-html-parse/request.md))
 
 ## 앞으로 구현할 내용
 
