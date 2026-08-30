@@ -129,6 +129,8 @@ test("automation notifications keep completion, download confirmation, and error
   const page = await readFile(pagePath, "utf8");
 
   assert.match(page, /workflow_status === "needs_download_confirmation"[\s\S]*?setIsErrorStatus\(false\)/);
+  assert.match(page, /status === "skipped"\) return "건너뜀"/);
+  assert.match(page, /setNotification\(result\.completion_reason \|\| "공시 자동화가 완료되었습니다\."\)/);
   assert.match(page, /const notificationTone = isErrorStatus[\s\S]*?\? "error"[\s\S]*?downloadConflicts\.length[\s\S]*?\? "warning"[\s\S]*?: notification[\s\S]*?\? "success"[\s\S]*?: "neutral"/);
   assert.match(page, /notificationTone=\{notificationTone\}/);
   assert.match(page, /refreshPlan\("resume", false\)/);

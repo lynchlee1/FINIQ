@@ -99,6 +99,7 @@ STAGE_LABELS = {
 KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE = 45
 KIND_AUTOMATION_CONTENT_REQUESTS_PER_MINUTE = 30
 KIND_AUTOMATION_WAIT_SECONDS = 60.0 / KIND_AUTOMATION_MAX_REQUESTS_PER_MINUTE
+NO_MATCHING_DISCLOSURES_MESSAGE = "조건에 맞는 공시 없음"
 ProgressCallback = Callable[[str], None]
 CancelCheck = Callable[[], bool]
 
@@ -532,6 +533,21 @@ def _inspect_detail_download(profile: dict[str, Any]) -> dict[str, Any]:
 def _filter_result_path(profile: dict[str, Any]) -> Path:
     workspace = _profile_workspace(profile)
     return workspace.filtered / profile["execution"]["mode"] / "filtered.json"
+
+
+def _filter_result_is_empty(
+    profile: dict[str, Any], result: dict[str, Any] | None = None
+) -> bool:
+    if result is None:
+        result = load_filter_workflow_result_payload(
+            data_root=Path(profile["data_root"]),
+            mode=profile["execution"]["mode"],
+            condition_blocks=profile["decisions"]["s3_selection"]["filter_blocks"],
+        )
+    disclosures = result.get("disclosures")
+    if not isinstance(disclosures, list):
+        raise ValueError("filter workflow result disclosures must be a list")
+    return not disclosures
 
 
 def _filter_signature(payload: dict[str, Any]) -> str:
@@ -1146,8 +1162,35 @@ def run_disclosure_automation_payload(
     def cancelled() -> bool:
         return bool(cancel_check and cancel_check())
 
+    def complete_without_downstream_stages(
+        remaining_stages: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        for remaining in remaining_stages:
+            status = (
+                "disabled"
+                if remaining["plan_action"] == "disabled"
+                else "skipped"
+            )
+            stage_results.append(
+                {
+                    "stage": int(remaining["stage"]),
+                    "label": remaining["label"],
+                    "status": status,
+                }
+            )
+            if status == "skipped":
+                emit(f"{remaining['label']}: 건너뜀 ({NO_MATCHING_DISCLOSURES_MESSAGE})")
+        return {
+            "format": "finiq_disclosure_automation_run_v1",
+            "workflow_status": "completed",
+            "completion_reason": NO_MATCHING_DISCLOSURES_MESSAGE,
+            "profile_hash": plan["profile_hash"],
+            "stages": stage_results,
+            "output_path": "",
+        }
+
     stage_results: list[dict[str, Any]] = []
-    for stage_plan in plan["stages"]:
+    for stage_index, stage_plan in enumerate(plan["stages"]):
         stage = int(stage_plan["stage"])
         action = stage_plan["plan_action"]
         if cancelled():
@@ -1158,6 +1201,14 @@ def run_disclosure_automation_payload(
                 {"stage": stage, "label": stage_plan["label"], "status": status}
             )
             emit(f"{stage_plan['label']}: {'사용 안 함' if action == 'disabled' else '재사용'}")
+            if (
+                stage == 3
+                and action == "reuse"
+                and _filter_result_is_empty(profile)
+            ):
+                return complete_without_downstream_stages(
+                    plan["stages"][stage_index + 1 :]
+                )
             continue
 
         emit(f"{stage_plan['label']}: 실행 시작")
@@ -1188,6 +1239,7 @@ def run_disclosure_automation_payload(
                 "download_conflicts": result["download_conflicts"],
                 "download_confirmation": result["download_confirmation"],
             }
+        stage_three_empty = stage == 3 and _filter_result_is_empty(profile, result)
         checkpoint = {
             "format": AUTOMATION_CHECKPOINT_FORMAT,
             "stage": stage,
@@ -1208,6 +1260,10 @@ def run_disclosure_automation_payload(
             }
         )
         emit(f"{stage_plan['label']}: 완료")
+        if stage_three_empty:
+            return complete_without_downstream_stages(
+                plan["stages"][stage_index + 1 :]
+            )
 
     return {
         "format": "finiq_disclosure_automation_run_v1",

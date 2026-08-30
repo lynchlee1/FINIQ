@@ -63,7 +63,7 @@ const STAGES = [
 type StageKey = (typeof STAGES)[number]["key"];
 type StageToggleState = Record<StageKey, boolean>;
 type PlanAction = "disabled" | "reuse" | "process" | "blocked";
-type RunStageStatus = "disabled" | "reused" | "succeeded" | "needs_download_confirmation" | "failed";
+type RunStageStatus = "disabled" | "reused" | "succeeded" | "skipped" | "needs_download_confirmation" | "failed";
 
 type PlanStage = {
   stage: number;
@@ -103,6 +103,7 @@ type AutomationRunResult = {
   stages: { stage: number; label: string; status: RunStageStatus; completed_at?: string }[];
   download_conflicts?: DownloadConflict[];
   download_confirmation?: string;
+  completion_reason?: string;
   output_path?: string;
 };
 
@@ -188,6 +189,7 @@ function runStatusLabel(status?: RunStageStatus) {
   if (status === "disabled") return "사용 안 함";
   if (status === "reused") return "완료 · 재사용";
   if (status === "succeeded") return "완료";
+  if (status === "skipped") return "건너뜀";
   if (status === "needs_download_confirmation") return "확인 필요";
   if (status === "failed") return "실패";
   return "대기 중";
@@ -278,7 +280,7 @@ export default function DisclosureAutomationPage() {
       }
       setDownloadConflicts([]);
       setDownloadConfirmation("");
-      setNotification("공시 자동화가 완료되었습니다.");
+      setNotification(result.completion_reason || "공시 자동화가 완료되었습니다.");
       setIsErrorStatus(false);
       void refreshPlan("resume", false);
     },

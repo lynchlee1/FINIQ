@@ -416,3 +416,102 @@ def test_automation_stops_before_later_stages_until_redownload_confirmation(
     assert executed == [1]
     assert result["workflow_status"] == "needs_download_confirmation"
     assert result["download_confirmation"] == "token"
+
+
+def test_automation_completes_after_empty_stage_three_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed: list[int] = []
+
+    def run_stage(stage: int, *_args: object, **_kwargs: object) -> dict[str, object]:
+        executed.append(stage)
+        if stage == 3:
+            return {"disclosures": [], "summary": {"returned_disclosures": 0}}
+        if stage > 3:
+            pytest.fail("조건에 맞는 공시가 없으면 04 이후를 실행하면 안 됩니다.")
+        return {"summary": {}}
+
+    monkeypatch.setattr(automation, "_run_stage", run_stage)
+
+    result = run_disclosure_automation_payload(_profile(tmp_path))
+
+    assert executed == [1, 2, 3]
+    assert result["workflow_status"] == "completed"
+    assert result["completion_reason"] == "조건에 맞는 공시 없음"
+    assert result["output_path"] == ""
+    assert [stage["status"] for stage in result["stages"]] == [
+        "succeeded",
+        "succeeded",
+        "succeeded",
+        "skipped",
+        "skipped",
+        "skipped",
+        "skipped",
+    ]
+
+
+def test_automation_does_not_treat_malformed_stage_three_result_as_empty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def run_stage(stage: int, *_args: object, **_kwargs: object) -> dict[str, object]:
+        return {"summary": {}}
+
+    monkeypatch.setattr(automation, "_run_stage", run_stage)
+
+    with pytest.raises(ValueError, match="disclosures must be a list"):
+        run_disclosure_automation_payload(_profile(tmp_path))
+    assert not (
+        tmp_path / ".finiq" / "disclosure-automation" / "checkpoints" / "stage-3.json"
+    ).exists()
+
+
+def test_automation_stops_after_reused_empty_stage_three_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    stages = [
+        {
+            "stage": stage,
+            "label": automation.STAGE_LABELS[stage],
+            "plan_action": "reuse" if stage <= 3 else "process",
+        }
+        for stage in automation.STAGE_NUMBERS
+    ]
+    monkeypatch.setattr(
+        automation,
+        "build_automation_plan_payload",
+        lambda _payload: {
+            "execution_allowed": True,
+            "profile": profile,
+            "profile_hash": "profile-hash",
+            "trigger": "resume",
+            "stages": stages,
+        },
+    )
+    monkeypatch.setattr(
+        automation,
+        "load_filter_workflow_result_payload",
+        lambda **_kwargs: {"disclosures": []},
+    )
+    monkeypatch.setattr(
+        automation,
+        "_run_stage",
+        lambda *_args, **_kwargs: pytest.fail("재사용한 빈 결과 뒤 단계를 실행하면 안 됩니다."),
+    )
+
+    result = run_disclosure_automation_payload(_profile(tmp_path))
+
+    assert result["workflow_status"] == "completed"
+    assert result["completion_reason"] == "조건에 맞는 공시 없음"
+    assert [stage["status"] for stage in result["stages"]] == [
+        "reused",
+        "reused",
+        "reused",
+        "skipped",
+        "skipped",
+        "skipped",
+        "skipped",
+    ]
