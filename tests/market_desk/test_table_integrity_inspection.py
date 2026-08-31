@@ -134,6 +134,8 @@ def test_table_inspection_counts_source_without_building_row_collections(
             "duplicate_rows": 1,
         },
     ]
+    assert set(result[7]) == {"2025", "2026"}
+    assert all(len(fingerprint) == 64 for fingerprint in result[7].values())
 
 
 def test_table_inspection_rejects_missing_source_page(
@@ -198,13 +200,22 @@ def test_table_inspection_confirms_source_manifest_and_shards(
     monkeypatch.setattr(table_export, "_validate_sqlite_manifest_counts", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         table_export,
-        "_sqlite_manifest_content_fingerprints",
-        lambda *_args, **_kwargs: ("a" * 64, None),
+        "_sqlite_manifest_content_fingerprint_details",
+        lambda *_args, **_kwargs: ("a" * 64, None, {"2026": "b" * 64}),
     )
     monkeypatch.setattr(
         table_export,
         "_inspect_source_folder_counts",
-        lambda *_args, **_kwargs: ({"2026": (1, 1)}, 1, 1, 2, 1, 1, pages),
+        lambda *_args, **_kwargs: (
+            {"2026": (1, 1)},
+            1,
+            1,
+            2,
+            1,
+            1,
+            pages,
+            {"2026": "b" * 64},
+        ),
     )
 
     result = table_export.inspect_disclosure_table_payload(
@@ -241,8 +252,8 @@ def test_table_inspection_rejects_stale_manifest_summary(
     monkeypatch.setattr(table_export, "_validate_sqlite_manifest_counts", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         table_export,
-        "_sqlite_manifest_content_fingerprints",
-        lambda *_args, **_kwargs: ("a" * 64, None),
+        "_sqlite_manifest_content_fingerprint_details",
+        lambda *_args, **_kwargs: ("a" * 64, None, {"2026": "b" * 64}),
     )
     monkeypatch.setattr(
         table_export,
@@ -262,6 +273,7 @@ def test_table_inspection_rejects_stale_manifest_summary(
                     "source_rows": 2,
                 }
             ],
+            {"2026": "b" * 64},
         ),
     )
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -19,9 +20,11 @@ from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.data_scraper.workflow import validate_kind_workflow_input_snapshot
 from finiq.market_desk.sqlite_generation import sqlite_generation_locked
 from finiq.market_desk.web.features.market_data.service_sources import (
+    _canonical_sqlite_disclosure_content,
     _disclosure_index_specs,
     _load_sqlite_manifest,
     _parse_source_body_page_file,
+    _sqlite_manifest_content_fingerprint_details,
     _sqlite_manifest_content_fingerprints,
     _validate_sqlite_manifest_content_fingerprint,
     _validate_sqlite_manifest_counts,
@@ -196,6 +199,40 @@ def _row_year(row: dict[str, Any]) -> str:
     raise ValueError(f"disclosed_date must begin with a four-digit year: {disclosed_date!r}")
 
 
+def _sqlite_row_from_source_record(
+    record: dict[str, Any],
+    *,
+    disclosed_date: str,
+    acpt_no: str,
+) -> dict[str, Any]:
+    return {
+        "row_no": record.get("row_no"),
+        "company_key": record.get("company_key"),
+        "company_name": record.get("company_name"),
+        "company_id": record.get("company_id"),
+        "company_cell_text": record.get("company_cell_text"),
+        "market": record.get("market"),
+        "badges_json": json.dumps(
+            list(record.get("badges") or []), ensure_ascii=False
+        ),
+        "disclosed_at": record.get("disclosed_at"),
+        "disclosed_date": disclosed_date,
+        "title": record.get("title"),
+        "title_attr": record.get("title_attr"),
+        "title_base": record.get("title_base"),
+        "title_display": record.get("title_display"),
+        "title_flags_json": json.dumps(
+            list(record.get("title_flags") or []), ensure_ascii=False
+        ),
+        "is_correction_report": 1 if record.get("is_correction_report") else 0,
+        "has_later_correction": 1 if record.get("has_later_correction") else 0,
+        "acpt_no": acpt_no,
+        "doc_no": record.get("doc_no"),
+        "submitter": record.get("submitter"),
+        "source_page": record.get("source_page"),
+    }
+
+
 def _collect_source_folder_rows_by_year(
     inventory: _SourceInventory,
     cancel_check: Callable[[], bool] | None = None,
@@ -279,32 +316,11 @@ def _collect_source_folder_rows_by_year(
                 page_duplicate_rows += 1
                 continue
             seen_acpt_nos.add(acpt_no)
-            row = {
-                "row_no": record.get("row_no"),
-                "company_key": record.get("company_key"),
-                "company_name": record.get("company_name"),
-                "company_id": record.get("company_id"),
-                "company_cell_text": record.get("company_cell_text"),
-                "market": record.get("market"),
-                "badges_json": json.dumps(
-                    list(record.get("badges") or []), ensure_ascii=False
-                ),
-                "disclosed_at": disclosed_at,
-                "disclosed_date": disclosed_date,
-                "title": record.get("title"),
-                "title_attr": record.get("title_attr"),
-                "title_base": record.get("title_base"),
-                "title_display": record.get("title_display"),
-                "title_flags_json": json.dumps(
-                    list(record.get("title_flags") or []), ensure_ascii=False
-                ),
-                "is_correction_report": 1 if record.get("is_correction_report") else 0,
-                "has_later_correction": 1 if record.get("has_later_correction") else 0,
-                "acpt_no": acpt_no,
-                "doc_no": record.get("doc_no"),
-                "submitter": record.get("submitter"),
-                "source_page": record.get("source_page"),
-            }
+            row = _sqlite_row_from_source_record(
+                record,
+                disclosed_date=disclosed_date,
+                acpt_no=acpt_no,
+            )
             company_key = str(row.get("company_key") or "").strip()
             if company_key:
                 company_keys.add(company_key)
@@ -358,9 +374,11 @@ def _inspect_source_folder_counts(
     int,
     int,
     list[dict[str, Any]],
+    dict[str, str],
 ]:
-    """Count source rows without retaining disclosure records in memory."""
+    """Count and fingerprint source rows without retaining them in memory."""
     shard_counts: dict[str, tuple[int, int]] = {}
+    shard_content_digests: dict[str, Any] = {}
     seen_acpt_nos: set[str] = set()
     company_keys: set[str] = set()
     pages: list[dict[str, Any]] = []
@@ -427,16 +445,20 @@ def _inspect_source_folder_counts(
                 continue
             seen_acpt_nos.add(acpt_no)
 
-            company_key = str(record.get("company_key") or "").strip()
+            row = _sqlite_row_from_source_record(
+                record,
+                disclosed_date=disclosed_date,
+                acpt_no=acpt_no,
+            )
+            company_key = str(row.get("company_key") or "").strip()
             if company_key:
                 company_keys.add(company_key)
             else:
                 unlinked_disclosure_count += 1
 
-            year = _row_year(
-                {
-                    "disclosed_date": disclosed_date
-                }
+            year = _row_year(row)
+            shard_content_digests.setdefault(year, hashlib.sha256()).update(
+                _canonical_sqlite_disclosure_content(row)
             )
             disclosures, unlinked = shard_counts.get(year, (0, 0))
             shard_counts[year] = (
@@ -475,6 +497,10 @@ def _inspect_source_folder_counts(
         duplicate_row_count,
         unlinked_disclosure_count,
         pages,
+        {
+            year: digest.hexdigest()
+            for year, digest in sorted(shard_content_digests.items())
+        },
     )
 
 
@@ -1233,10 +1259,14 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             filter_workers=body.get("table_workers"),
             validate_structure=True,
         )
-        actual_content_fingerprint = _sqlite_manifest_content_fingerprints(
+        (
+            actual_content_fingerprint,
+            _prefix_fingerprint,
+            actual_shard_content_fingerprints,
+        ) = _sqlite_manifest_content_fingerprint_details(
             manifest_path,
             manifest,
-        )[0]
+        )
         _validate_sqlite_manifest_content_fingerprint(
             manifest_path,
             manifest,
@@ -1257,6 +1287,7 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             duplicate_row_count,
             unlinked_disclosure_count,
             pages,
+            source_shard_content_fingerprints,
         ) = _inspect_source_folder_counts(
             source_inventory,
             worker_count=source_workers,
@@ -1299,6 +1330,10 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
         ]
         if actual_shards != expected_shards:
             raise ValueError("다운로드한 원본 데이터의 연도별 건수와 SQLite 파일 구성이 다릅니다.")
+        if source_shard_content_fingerprints != actual_shard_content_fingerprints:
+            raise ValueError(
+                "다운로드한 원본 공시 내용과 연도별 SQLite 파일의 내용이 다릅니다."
+            )
     except Exception as error:
         return {
             "format": "finiq_disclosure_table_inspection_v1",

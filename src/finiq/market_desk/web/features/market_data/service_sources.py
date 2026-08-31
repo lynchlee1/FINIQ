@@ -71,6 +71,108 @@ def _disclosure_index_specs(table_name: str) -> dict[str, tuple[str, ...]]:
     }
 
 
+def _is_persisted_path_key(value: object) -> bool:
+    key = str(value or "")
+    return (
+        key in {
+            "path",
+            "source_file",
+            "source_url",
+            "root_directory",
+            "output_directory",
+        }
+        or key.endswith("_path")
+        or key.endswith("_root")
+    )
+
+
+def _find_persisted_path_key(
+    value: object,
+    *,
+    location: str = "manifest",
+) -> str | None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_location = f"{location}.{key}"
+            if _is_persisted_path_key(key):
+                return child_location
+            found = _find_persisted_path_key(child, location=child_location)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found = _find_persisted_path_key(
+                child,
+                location=f"{location}[{index}]",
+            )
+            if found is not None:
+                return found
+    return None
+
+
+def _validate_sqlite_manifest_fields(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+) -> None:
+    allowed_fields = {
+        "format",
+        "schema_version",
+        "generated_at",
+        "source_type",
+        "table_name",
+        "summary",
+        "pages",
+        "shards",
+        "content_fingerprint",
+    }
+    allowed_summary_fields = {
+        "companies",
+        "source_rows",
+        "duplicate_rows",
+        "disclosures",
+        "unlinked_disclosures",
+        "shards",
+    }
+    allowed_page_fields = {
+        "period_start",
+        "period_end",
+        "source_page",
+        "source_rows",
+        "written_rows",
+        "duplicate_rows",
+    }
+    allowed_shard_fields = {
+        "year",
+        "companies",
+        "disclosures",
+        "unlinked_disclosures",
+        "indexes",
+        "fts_enabled",
+    }
+    field_groups = [
+        ("manifest", manifest, allowed_fields),
+        ("manifest.summary", manifest.get("summary"), allowed_summary_fields),
+    ]
+    field_groups.extend(
+        (f"manifest.pages[{index}]", page, allowed_page_fields)
+        for index, page in enumerate(manifest.get("pages") or [])
+    )
+    field_groups.extend(
+        (f"manifest.shards[{index}]", shard, allowed_shard_fields)
+        for index, shard in enumerate(manifest.get("shards") or [])
+    )
+    for location, value, allowed in field_groups:
+        if not isinstance(value, dict):
+            continue
+        unexpected = sorted(set(value).difference(allowed))
+        if unexpected:
+            raise ValueError(
+                "SQLite manifest 스키마 4의 필드가 저장 계약과 다릅니다: "
+                f"manifest={manifest_path}, location={location}, "
+                f"unexpected={unexpected}"
+            )
+
+
 def _validate_sqlite_shard_structure(
     connection: sqlite3.Connection,
     *,
@@ -83,11 +185,23 @@ def _validate_sqlite_shard_structure(
     unlinked_disclosures: int,
 ) -> None:
     columns = _sqlite_table_columns(connection, table_name)
-    for column_name in (
+    expected_columns = {
+        "id",
         *_SQLITE_CONTENT_FINGERPRINT_FIELDS,
         "source_page",
-    ):
-        _sqlite_select_column(columns, column_name)
+    }
+    if columns != expected_columns:
+        unexpected_columns = sorted(columns.difference(expected_columns))
+        if any(_is_persisted_path_key(column) for column in unexpected_columns):
+            raise ValueError(
+                "연도별 SQLite 공시 행에 경로 열을 저장할 수 없습니다: "
+                f"파일={shard_path}, 열={unexpected_columns}"
+            )
+        raise ValueError(
+            "연도별 SQLite 공시 열이 저장 계약과 다릅니다: "
+            f"파일={shard_path}, expected={sorted(expected_columns)}, "
+            f"actual={sorted(columns)}"
+        )
 
     shard_year = str(shard.get("year") or "").strip()
     if len(shard_year) != 4 or not shard_year.isdigit():
@@ -130,15 +244,22 @@ def _validate_sqlite_shard_structure(
         "unlinked_disclosures": str(unlinked_disclosures),
         "fts_enabled": "true",
     }
+    unexpected_metadata = sorted(set(metadata).difference(expected_metadata))
+    if any(_is_persisted_path_key(key) for key in unexpected_metadata):
+        raise ValueError(
+            "연도별 SQLite table_metadata에 경로를 저장할 수 없습니다: "
+            f"파일={shard_path}, keys={unexpected_metadata}"
+        )
     mismatched_metadata = {
         key: {"expected": value, "actual": metadata.get(key)}
         for key, value in expected_metadata.items()
         if metadata.get(key) != value
     }
-    if mismatched_metadata:
+    if mismatched_metadata or unexpected_metadata:
         raise ValueError(
             "연도별 SQLite 파일의 table_metadata가 변환 계약과 다릅니다: "
-            f"파일={shard_path}, 불일치={mismatched_metadata}"
+            f"파일={shard_path}, 불일치={mismatched_metadata}, "
+            f"추가={unexpected_metadata}"
         )
 
     expected_index_specs = _disclosure_index_specs(table_name)
@@ -185,6 +306,22 @@ def _validate_sqlite_shard_structure(
         fts_definition[0] or ""
     ).casefold():
         raise ValueError(f"연도별 SQLite 파일에 FTS5 표가 없습니다: {shard_path}")
+    normalized_fts_definition = "".join(
+        str(fts_definition[0] or "").casefold().split()
+    )
+    expected_fts_clause = (
+        "usingfts5(title,company_name,submitter,"
+        f"content='{table_name.casefold()}',content_rowid='id')"
+    )
+    fts_columns = _sqlite_table_columns(connection, fts_table)
+    if (
+        fts_columns != {"title", "company_name", "submitter"}
+        or expected_fts_clause not in normalized_fts_definition
+    ):
+        raise ValueError(
+            "연도별 SQLite 파일의 FTS5 표 정의가 저장 계약과 다릅니다: "
+            f"{shard_path}"
+        )
     quoted_fts = _quoted_sqlite_identifier(fts_table)
     try:
         connection.execute(
@@ -216,6 +353,13 @@ def _validate_sqlite_manifest_counts(
         raise ValueError(
             f"SQLite manifest schema_version must be 4: {manifest_path}"
         )
+    persisted_path = _find_persisted_path_key(manifest)
+    if persisted_path is not None:
+        raise ValueError(
+            "SQLite manifest 스키마 4에는 경로 필드를 저장할 수 없습니다: "
+            f"{persisted_path}"
+        )
+    _validate_sqlite_manifest_fields(manifest_path, manifest)
     table_name = (
         str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
     )
@@ -509,6 +653,54 @@ _SQLITE_CONTENT_FINGERPRINT_FIELDS = (
 )
 
 
+def _canonical_sqlite_disclosure_content(record: dict[str, Any]) -> bytes:
+    canonical = json.dumps(
+        [record.get(field) for field in _SQLITE_CONTENT_FINGERPRINT_FIELDS],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return canonical + b"\n"
+
+
+def _sqlite_manifest_content_fingerprint_details(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    *,
+    prefix_count: int | None = None,
+) -> tuple[str, str | None, dict[str, str]]:
+    """Hash canonical SQLite content overall, by year, and for an optional prefix."""
+    if prefix_count is not None and prefix_count < 0:
+        raise ValueError("SQLite fingerprint prefix count must be >= 0")
+
+    digest = hashlib.sha256()
+    prefix_fingerprint = digest.hexdigest() if prefix_count == 0 else None
+    year_fingerprints: dict[str, str] = {}
+    row_count = 0
+    for shard in sorted(
+        list(manifest.get("shards") or []),
+        key=lambda item: str(item.get("year") or ""),
+    ):
+        year = str(shard.get("year") or "").strip()
+        year_digest = hashlib.sha256()
+        shard_manifest = {**manifest, "shards": [shard]}
+        for record in _iter_sqlite_manifest_disclosure_records(
+            manifest_path,
+            shard_manifest,
+            prepare=False,
+        ):
+            canonical = _canonical_sqlite_disclosure_content(record)
+            digest.update(canonical)
+            year_digest.update(canonical)
+            row_count += 1
+            if row_count == prefix_count:
+                prefix_fingerprint = digest.hexdigest()
+        year_fingerprints[year] = year_digest.hexdigest()
+
+    if prefix_count is not None and prefix_count > row_count:
+        prefix_fingerprint = None
+    return digest.hexdigest(), prefix_fingerprint, year_fingerprints
+
+
 def _sqlite_manifest_content_fingerprints(
     manifest_path: Path,
     manifest: dict[str, Any],
@@ -516,31 +708,14 @@ def _sqlite_manifest_content_fingerprints(
     prefix_count: int | None = None,
 ) -> tuple[str, str | None]:
     """Hash canonical SQLite row content and an optional leading row prefix."""
-    if prefix_count is not None and prefix_count < 0:
-        raise ValueError("SQLite fingerprint prefix count must be >= 0")
-
-    digest = hashlib.sha256()
-    prefix_fingerprint = digest.hexdigest() if prefix_count == 0 else None
-    row_count = 0
-    for record in _iter_sqlite_manifest_disclosure_records(
-        manifest_path,
-        manifest,
-        prepare=False,
-    ):
-        canonical = json.dumps(
-            [record.get(field) for field in _SQLITE_CONTENT_FINGERPRINT_FIELDS],
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        digest.update(canonical)
-        digest.update(b"\n")
-        row_count += 1
-        if row_count == prefix_count:
-            prefix_fingerprint = digest.hexdigest()
-
-    if prefix_count is not None and prefix_count > row_count:
-        prefix_fingerprint = None
-    return digest.hexdigest(), prefix_fingerprint
+    fingerprint, prefix_fingerprint, _year_fingerprints = (
+        _sqlite_manifest_content_fingerprint_details(
+            manifest_path,
+            manifest,
+            prefix_count=prefix_count,
+        )
+    )
+    return fingerprint, prefix_fingerprint
 
 
 def _validate_sqlite_manifest_content_fingerprint(

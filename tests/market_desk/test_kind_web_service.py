@@ -2197,6 +2197,194 @@ def test_table_inspection_rejects_damaged_sqlite_structure(
     assert expected_reason in inspection["reason"]
 
 
+def test_table_inspection_rejects_same_count_source_content_change(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    body_path = next(source_root.rglob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8").replace(
+            "전환사채발행결정",
+            "완전히다른공시제목",
+        ),
+        encoding="utf-8",
+    )
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert inspection["confirmed"] is False
+    assert "원본 공시 내용과 연도별 SQLite 파일의 내용이 다릅니다" in inspection[
+        "reason"
+    ]
+
+
+def test_table_inspection_matches_content_across_year_shards(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    source_folder = next(source_root.rglob("kind_workflow.input.json")).parent
+    renamed_folder = source_folder.with_name("20251201_20260131")
+    source_folder.rename(renamed_folder)
+    metadata_path = renamed_folder / "kind_workflow.input.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["start_date"] = "2025-12-01"
+    metadata["end_date"] = "2026-01-31"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    body_path = next(renamed_folder.glob("*_post_page_*.body"))
+    body_path.write_text(
+        body_path.read_text(encoding="utf-8")
+        .replace("2025-01-02", "2025-12-31")
+        .replace("2025-01-03", "2026-01-01"),
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "02-table"
+
+    build = build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert [shard["year"] for shard in build["shards"]] == ["2025", "2026"]
+    assert inspection["confirmed"] is True
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["manifest_path", "shard_path", "metadata_path", "source_file_column"],
+)
+def test_table_inspection_rejects_schema4_path_storage(
+    tmp_path: Path,
+    damage: str,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest_path = output_root / "sqlite_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    shard_path = output_root / f"{manifest['shards'][0]['year']}.sqlite"
+    if damage == "manifest_path":
+        manifest["source_path"] = "/private/source"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+    elif damage == "shard_path":
+        manifest["shards"][0]["relative_path"] = "legacy/2025.sqlite"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+        )
+    else:
+        with sqlite3.connect(shard_path) as connection:
+            if damage == "metadata_path":
+                connection.execute(
+                    "INSERT INTO table_metadata(key, value) VALUES "
+                    "('source_path', '/private/source')"
+                )
+            else:
+                connection.execute(
+                    "ALTER TABLE disclosures ADD COLUMN source_file TEXT"
+                )
+                connection.execute(
+                    "UPDATE disclosures SET source_file = '/private/source/page.body'"
+                )
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert inspection["confirmed"] is False
+    assert "경로" in inspection["reason"]
+
+
+def test_table_inspection_rejects_schema4_unexpected_manifest_field(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest_path = output_root / "sqlite_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["unexpected_metadata"] = "not part of schema 4"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert inspection["confirmed"] is False
+    assert "스키마 4의 필드가 저장 계약과 다릅니다" in inspection["reason"]
+
+
+def test_table_inspection_rejects_unbound_fts5_table(tmp_path: Path) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest = json.loads(
+        (output_root / "sqlite_manifest.json").read_text(encoding="utf-8")
+    )
+    shard_path = output_root / f"{manifest['shards'][0]['year']}.sqlite"
+    with sqlite3.connect(shard_path) as connection:
+        connection.execute("DROP TABLE disclosures_fts")
+        connection.execute(
+            "CREATE VIRTUAL TABLE disclosures_fts USING fts5(title)"
+        )
+        connection.execute(
+            "INSERT INTO disclosures_fts(title) VALUES ('원문과 무관한 인덱스')"
+        )
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert inspection["confirmed"] is False
+    assert "FTS5 표 정의가 저장 계약과 다릅니다" in inspection["reason"]
+
+
 def test_build_and_inspect_disclosure_table_reject_metadata_folder_range_mismatch(
     tmp_path: Path,
 ) -> None:
