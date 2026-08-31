@@ -29,6 +29,26 @@ from finiq.market_desk.web.features.disclosures.filter_presets import (
 )
 
 
+def _publish_filtered_result(path: Path, payload: dict[str, object]) -> None:
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    workflow_path = path.with_name("filter.json")
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow.pop("result", None)
+    workflow.pop("pending", None)
+    workflow.update(
+        {
+            "status": "completed",
+            "result_file": path.name,
+            "result_fingerprint": _source_json_fingerprint(payload),
+        }
+    )
+    workflow["steps"]["database_query"]["status"] = "completed"
+    workflow["steps"]["record"]["status"] = "completed"
+    workflow_path.write_text(
+        json.dumps(workflow, ensure_ascii=False), encoding="utf-8"
+    )
+
+
 def _compression_payload(
     tmp_path: Path, *, mode: str = "bond_issuance"
 ) -> dict[str, object]:
@@ -42,21 +62,18 @@ def _compression_payload(
     )
     filtered_path = data_root / "03-filter" / mode / "filtered.json"
     filtered_path.parent.mkdir(parents=True, exist_ok=True)
-    filtered_path.write_text(
-        json.dumps(
-            {
-                "format": "kind_disclosure_filter_v1",
-                "disclosures": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "title": "테스트 공시",
-                        "disclosed_at": "2025-01-01",
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _publish_filtered_result(
+        filtered_path,
+        {
+            "format": "kind_disclosure_filter_v1",
+            "disclosures": [
+                {
+                    "acpt_no": "20250101000001",
+                    "title": "테스트 공시",
+                    "disclosed_at": "2025-01-01",
+                }
+            ],
+        },
     )
     payload = apply_workspace_defaults(
         "external_html_compress",
@@ -134,7 +151,7 @@ def test_workspace_compression_uses_current_complete_filter_metadata(
             "company_cell_text": "현재 회사 표시값",
         }
     )
-    filtered_path.write_text(json.dumps(filtered, ensure_ascii=False), encoding="utf-8")
+    _publish_filtered_result(filtered_path, filtered)
     manifest_path = (
         Path(str(payload["input_directory"]))
         / "kind_disclosure_html_manifest.json"
@@ -155,7 +172,7 @@ def test_workspace_compression_uses_current_complete_filter_metadata(
     assert inspect_disclosure_external_html_compress_payload(payload)["passed"] is True
 
     filtered["disclosures"][0]["title"] = "더 최신 제목"
-    filtered_path.write_text(json.dumps(filtered, ensure_ascii=False), encoding="utf-8")
+    _publish_filtered_result(filtered_path, filtered)
 
     inspected = inspect_disclosure_external_html_compress_payload(payload)
 
@@ -176,6 +193,42 @@ def test_external_html_compression_uses_requested_progress_interval(
     )
 
     assert "외부 HTML 압축 중간 확인: 1/1건 처리." in progress_log
+
+
+def test_workspace_compression_rejects_uncompleted_filter_workflow(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    workflow_path = (
+        Path(str(payload["data_root"]))
+        / "03-filter"
+        / "bond_issuance"
+        / "filter.json"
+    )
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["status"] = "ready"
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="filter workflow is not completed"):
+        compress_disclosure_external_html_payload(payload)
+
+
+def test_workspace_compression_rejects_changed_filtered_result(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    filtered_path = (
+        Path(str(payload["data_root"]))
+        / "03-filter"
+        / "bond_issuance"
+        / "filtered.json"
+    )
+    filtered = json.loads(filtered_path.read_text(encoding="utf-8"))
+    filtered["disclosures"][0]["title"] = "봉인 뒤에 바뀐 제목"
+    filtered_path.write_text(json.dumps(filtered, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="result fingerprint does not match"):
+        compress_disclosure_external_html_payload(payload)
 
 
 def test_external_html_compression_cancel_preserves_existing_output(
@@ -273,6 +326,86 @@ def test_inspect_external_html_compression_skips_mode_without_source_html(
     assert inspected["missing_files"] == []
 
 
+def test_inspect_external_html_compression_rejects_orphaned_output(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    compress_disclosure_external_html_payload(payload)
+    input_directory = Path(str(payload["input_directory"]))
+    (input_directory / "2025" / "20250101000001.html").unlink()
+
+    inspected = inspect_disclosure_external_html_compress_payload(payload)
+
+    assert inspected["passed"] is False
+    assert inspected["skipped"] is False
+    assert inspected["orphaned_output"] is True
+    assert inspected["unexpected_records"] == 1
+    assert Path(str(inspected["compressed_path"])).is_file()
+
+    all_modes = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+    assert all_modes["failed_modes"] == ["bond_issuance"]
+    assert all_modes["repairable_failed_modes"] == []
+
+
+def test_compression_rejects_source_html_changed_after_manifest(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    compress_disclosure_external_html_payload(payload)
+    compressed_path = (
+        Path(str(payload["output_directory"])) / "compressed-external-html.json"
+    )
+    saved_before = compressed_path.read_bytes()
+    html_path = (
+        Path(str(payload["input_directory"]))
+        / "2025"
+        / "20250101000001.html"
+    )
+    html_path.write_text(
+        """
+        <html><body>
+          <input type="hidden" name="acptNo" value="20250101000001" />
+          <select id="mainDoc">
+            <option value="20250101000777|Y" selected="selected">바뀐 본문</option>
+          </select>
+          <select id="attachedDoc"><option value="20250101000888">첨부</option></select>
+        </body></html>
+        """,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="manifest integrity"):
+        compress_disclosure_external_html_payload(payload)
+
+    inspected = inspect_disclosure_external_html_compress_payload(payload)
+    assert inspected["passed"] is False
+    assert "manifest integrity" in inspected["error"]
+    assert compressed_path.read_bytes() == saved_before
+
+
+def test_compression_rejects_missing_manifest_integrity_baseline(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    manifest_path = (
+        Path(str(payload["input_directory"]))
+        / "kind_disclosure_html_manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["disclosures"][0].pop("source_sha256")
+    manifest["disclosures"][0].pop("source_size_bytes")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="manifest integrity.*unverified"):
+        compress_disclosure_external_html_payload(payload)
+
+    assert not (
+        Path(str(payload["output_directory"])) / "compressed-external-html.json"
+    ).exists()
+
+
 def test_inspect_external_html_compression_skips_missing_source_directory(
     tmp_path: Path,
 ) -> None:
@@ -334,9 +467,7 @@ def test_inspect_external_html_compression_ignores_filter_targets_without_html(
             "disclosed_at": "2025-01-02",
         }
     )
-    filtered_path.write_text(
-        json.dumps(filtered, ensure_ascii=False), encoding="utf-8"
-    )
+    _publish_filtered_result(filtered_path, filtered)
 
     inspected = inspect_disclosure_external_html_compress_payload(payload)
 
@@ -516,9 +647,7 @@ def test_derived_mode_inspects_the_same_owner_html_and_compressed_file(
         "disclosed_at": "2025-01-02",
     }
     parent_filtered["disclosures"].append(second_disclosure)
-    parent_filtered_path.write_text(
-        json.dumps(parent_filtered, ensure_ascii=False), encoding="utf-8"
-    )
+    _publish_filtered_result(parent_filtered_path, parent_filtered)
     input_directory = Path(str(payload["input_directory"]))
     (input_directory / "2025" / "20250102000002.html").write_text(
         """
@@ -548,18 +677,25 @@ def test_derived_mode_inspects_the_same_owner_html_and_compressed_file(
         / child_mode
         / "filtered.json"
     )
-    child_filtered_path.parent.mkdir(parents=True)
-    child_filtered_path.write_text(
-        json.dumps(
-            {
-                "format": "kind_disclosure_filter_v1",
+    manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": child_mode,
                 "parent_mode": "bond_issuance",
-                "parent_result_fingerprint": _source_json_fingerprint(parent_filtered),
-                "disclosures": [second_disclosure],
+                "condition_blocks": [],
             },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+        }
+    )
+    _publish_filtered_result(
+        child_filtered_path,
+        {
+            "format": "kind_disclosure_filter_v1",
+            "parent_mode": "bond_issuance",
+            "parent_result_fingerprint": _source_json_fingerprint(parent_filtered),
+            "disclosures": [second_disclosure],
+        },
     )
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.external_html_compress._workspace_filter_presets",

@@ -23,6 +23,47 @@ from finiq.market_desk.web.features.disclosures.html_common import (
 _REQUEST_METADATA = object()
 
 
+def _validate_external_html_manifest_integrity(
+    *,
+    input_directory: Path,
+    records: list[dict[str, Any]],
+) -> None:
+    (
+        manifest_format,
+        _source_fingerprint,
+        expected_integrity,
+        _selected_doc_numbers,
+    ) = _load_html_manifest_integrity(input_directory)
+    if not manifest_format:
+        raise ValueError(
+            "external HTML manifest integrity baseline is missing: "
+            f"{input_directory / HTML_MANIFEST_FILENAME}"
+        )
+
+    unverified: list[str] = []
+    mismatched: list[str] = []
+    for record in records:
+        acpt_no = str(record.get("acpt_no") or "").strip()
+        expected = expected_integrity.get(acpt_no)
+        if expected is None:
+            unverified.append(acpt_no)
+            continue
+        if (
+            record.get("source_sha256") != expected["source_sha256"]
+            or record.get("source_size_bytes") != expected["source_size_bytes"]
+        ):
+            mismatched.append(acpt_no)
+    if unverified or mismatched:
+        details: list[str] = []
+        if unverified:
+            details.append("unverified=" + ", ".join(unverified[:10]))
+        if mismatched:
+            details.append("mismatched=" + ", ".join(mismatched[:10]))
+        raise ValueError(
+            "external HTML manifest integrity check failed: " + "; ".join(details)
+        )
+
+
 def _workspace_filter_presets(data_root: object) -> list[dict[str, Any]]:
     response = manage_filter_presets_payload(
         {"data_root": data_root, "action": "list"}
@@ -74,7 +115,11 @@ def inspect_all_disclosure_external_html_compress_payload(
                 "mode": mode,
                 **({"parent_mode": parent_mode} if parent_mode else {}),
                 **inspected,
-                "repairable": not parent_mode and not inspected["passed"],
+                "repairable": (
+                    not parent_mode
+                    and not inspected["passed"]
+                    and not inspected.get("orphaned_output", False)
+                ),
             }
         )
 
@@ -304,6 +349,7 @@ def inspect_disclosure_external_html_compress_payload(
                 "missing_files": [],
                 "invalid_files": [],
                 "content_matches_source": False,
+                "orphaned_output": False,
                 "error": str(exc),
             }
         expected_records = len(derived["acpt_numbers"])
@@ -320,6 +366,7 @@ def inspect_disclosure_external_html_compress_payload(
             "missing_files": [],
             "invalid_files": [],
             "content_matches_source": True,
+            "orphaned_output": False,
             "error": "",
         }
     expected_acpt_numbers = (
@@ -332,6 +379,21 @@ def inspect_disclosure_external_html_compress_payload(
     )
 
     if not expected_acpt_numbers:
+        if compressed_path.exists():
+            verification = _verify_compressed_external_html_files(
+                written_files=[str(compressed_path)],
+                expected_acpt_numbers=[],
+            )
+            return {
+                "format": "finiq_disclosure_external_html_compress_inspection_v1",
+                "compressed_path": str(compressed_path),
+                **verification,
+                "passed": False,
+                "skipped": False,
+                "orphaned_output": True,
+                "content_matches_source": False,
+                "error": "원본 HTML이 없지만 이전 압축 JSON이 남아 있습니다.",
+            }
         return {
             "format": "finiq_disclosure_external_html_compress_inspection_v1",
             "compressed_path": str(compressed_path),
@@ -345,6 +407,7 @@ def inspect_disclosure_external_html_compress_payload(
             "missing_files": [],
             "invalid_files": [],
             "content_matches_source": True,
+            "orphaned_output": False,
             "error": "",
         }
 
@@ -357,6 +420,7 @@ def inspect_disclosure_external_html_compress_payload(
         "compressed_path": str(compressed_path),
         **verification,
         "skipped": False,
+        "orphaned_output": False,
         "content_matches_source": False,
         "error": "",
     }
@@ -620,6 +684,10 @@ def compress_disclosure_external_html_payload(
         raise ValueError(
             "External HTML compression membership does not match input filenames"
         )
+    _validate_external_html_manifest_integrity(
+        input_directory=input_directory,
+        records=records,
+    )
     ensure_not_cancelled()
     output_directory.parent.mkdir(parents=True, exist_ok=True)
     cleanup_warnings: list[str] = []

@@ -432,6 +432,56 @@ def _collect_disclosure_metadata_from_json(value: Any) -> dict[str, dict[str, An
     return metadata
 
 
+def _load_completed_filter_result(
+    source_path: Path,
+    *,
+    mode: str,
+    parent_mode: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    workflow_path = source_path.with_name("filter.json")
+    if not workflow_path.is_file():
+        raise ValueError(f"filter workflow does not exist: {workflow_path}")
+    try:
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"filter workflow is invalid: {workflow_path}") from exc
+    if (
+        not isinstance(workflow, dict)
+        or workflow.get("format") != "finiq_disclosure_filter_workflow"
+        or workflow.get("mode") != mode
+        or workflow.get("parent_mode") != parent_mode
+    ):
+        raise ValueError(f"filter workflow is invalid: {workflow_path}")
+    if workflow.get("status") != "completed":
+        raise ValueError(f"filter workflow is not completed: {workflow_path}")
+    if workflow.get("result_file") != source_path.name:
+        raise ValueError(
+            f"filter workflow result file does not match: {workflow_path}"
+        )
+    expected_fingerprint = str(workflow.get("result_fingerprint") or "").strip()
+    if (
+        len(expected_fingerprint) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in expected_fingerprint
+        )
+    ):
+        raise ValueError(
+            f"filter workflow result fingerprint is invalid: {workflow_path}"
+        )
+    try:
+        payload = json.loads(source_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"filtered disclosure JSON is invalid: {source_path}"
+        ) from exc
+    if _source_json_fingerprint(payload) != expected_fingerprint:
+        raise ValueError(
+            f"filter workflow result fingerprint does not match: {source_path}"
+        )
+    return payload, workflow
+
+
 def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
     for key in ("json", "payload", "source_json_path"):
         if key in body:
@@ -447,7 +497,11 @@ def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
     source_path = workspace.filter_mode(mode, parent_mode=parent_mode) / "filtered.json"
     if not source_path.is_file():
         raise ValueError(f"filtered disclosure JSON does not exist: {source_path}")
-    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    payload, workflow = _load_completed_filter_result(
+        source_path,
+        mode=mode,
+        parent_mode=parent_mode,
+    )
     if (
         not isinstance(payload, dict)
         or payload.get("format") != "kind_disclosure_filter_v1"
@@ -464,7 +518,11 @@ def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
             raise ValueError(
                 f"parent filtered disclosure JSON does not exist: {parent_path}"
             )
-        parent_payload = json.loads(parent_path.read_text(encoding="utf-8"))
+        parent_payload, _parent_workflow = _load_completed_filter_result(
+            parent_path,
+            mode=parent_mode,
+            parent_mode=None,
+        )
         if (
             not isinstance(parent_payload, dict)
             or parent_payload.get("format") != "kind_disclosure_filter_v1"
@@ -488,6 +546,13 @@ def _load_workspace_filtered_payload(body: dict[str, Any]) -> tuple[Any, str]:
         actual_fingerprint = str(
             payload.get("parent_result_fingerprint") or ""
         ).strip()
+        if (
+            workflow.get("parent_result_fingerprint")
+            != actual_fingerprint
+        ):
+            raise ValueError(
+                f"derived filter workflow provenance does not match: {source_path}"
+            )
         if actual_fingerprint != expected_fingerprint:
             raise ValueError(
                 f"derived filtered disclosure parent result is stale: {source_path}"

@@ -14,6 +14,9 @@ from finiq.market_desk.web.features.disclosures.external_compact import (
 from finiq.market_desk.web.features.disclosures.external_html_download import (
     download_disclosure_external_html_payload,
 )
+from finiq.market_desk.web.features.disclosures.html_common import (
+    _source_json_fingerprint,
+)
 from finiq.market_desk.web.features.disclosures.html_parse_common import (
     _parse_filter_blocks,
     _parse_parallel_workers,
@@ -123,16 +126,28 @@ def test_html_download_rejects_invalid_worker_values(tmp_path, value, message) -
         / "filtered.json"
     )
     filtered_path.parent.mkdir(parents=True)
+    filtered = {
+        "format": "kind_disclosure_filter_v1",
+        "disclosures": [
+            {
+                "acpt_no": "20250101000001",
+                "disclosed_at": "2025-01-01",
+            }
+        ],
+    }
     filtered_path.write_text(
+        json.dumps(filtered),
+        encoding="utf-8",
+    )
+    filtered_path.with_name("filter.json").write_text(
         json.dumps(
             {
-                "format": "kind_disclosure_filter_v1",
-                "disclosures": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "disclosed_at": "2025-01-01",
-                    }
-                ],
+                "format": "finiq_disclosure_filter_workflow",
+                "mode": "bond_issuance",
+                "parent_mode": None,
+                "status": "completed",
+                "result_file": "filtered.json",
+                "result_fingerprint": _source_json_fingerprint(filtered),
             }
         ),
         encoding="utf-8",

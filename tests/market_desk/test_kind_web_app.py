@@ -176,9 +176,23 @@ def _external_workspace_body(
             for disclosure in source_json["disclosures"]
             if isinstance(disclosure, dict)
         ]
-    filtered_path.write_text(
-        json.dumps({"format": "kind_disclosure_filter_v1", **normalized_source_json}),
-        encoding="utf-8",
+    filtered = {"format": "kind_disclosure_filter_v1", **normalized_source_json}
+    filtered_path.write_text(json.dumps(filtered), encoding="utf-8")
+    workflow_path = filtered_path.with_name("filter.json")
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow.pop("result", None)
+    workflow.pop("pending", None)
+    workflow.update(
+        {
+            "status": "completed",
+            "result_file": filtered_path.name,
+            "result_fingerprint": filter_presets._canonical_result_sha256(filtered),
+        }
+    )
+    workflow["steps"]["database_query"]["status"] = "completed"
+    workflow["steps"]["record"]["status"] = "completed"
+    workflow_path.write_text(
+        json.dumps(workflow, ensure_ascii=False), encoding="utf-8"
     )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
@@ -2765,21 +2779,15 @@ def test_external_html_check_existing_route_inspects_every_workspace_mode(
     )
     data_root = Path(str(body["data_root"]))
     _save_filter_workflow(data_root, mode="rights_issuance")
-    rights_filtered = data_root / "03-filter" / "rights_issuance" / "filtered.json"
-    rights_filtered.parent.mkdir(parents=True, exist_ok=True)
-    rights_filtered.write_text(
-        json.dumps(
+    _complete_filter_workflow(
+        data_root,
+        mode="rights_issuance",
+        disclosures=[
             {
-                "format": "kind_disclosure_filter_v1",
-                "disclosures": [
-                    {
-                        "acpt_no": "20250102000002",
-                        "disclosed_at": "2025-01-02",
-                    }
-                ],
+                "acpt_no": "20250102000002",
+                "disclosed_at": "2025-01-02",
             }
-        ),
-        encoding="utf-8",
+        ],
     )
 
     response = TestClient(app).post(
@@ -3112,6 +3120,11 @@ def test_internal_html_download_inspect_folder_route_uses_yearly_layout(tmp_path
             "records": [{
                 "acpt_no": "20250101000001",
                 "selected_main_doc_no": "20250101000099",
+                "docs": [{
+                    "select_id": "mainDoc",
+                    "doc_no": "20250101000099",
+                    "selected": True,
+                }],
                 "metadata": {"disclosed_at": "2025-01-01"},
             }],
         }),
@@ -3168,6 +3181,11 @@ def test_internal_html_check_existing_uses_yearly_layout(tmp_path: Path) -> None
             "records": [{
                 "acpt_no": "20250101000001",
                 "selected_main_doc_no": "20250101000099",
+                "docs": [{
+                    "select_id": "mainDoc",
+                    "doc_no": "20250101000099",
+                    "selected": True,
+                }],
                 "metadata": {"disclosed_at": "2025-01-01"},
             }],
         }),
@@ -3206,6 +3224,11 @@ def test_internal_html_check_existing_uses_compressed_json_year(
                         {
                             "acpt_no": "20250101000001",
                             "selected_main_doc_no": "20250101000999",
+                            "docs": [{
+                                "select_id": "mainDoc",
+                                "doc_no": "20250101000999",
+                                "selected": True,
+                            }],
                             "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3252,6 +3275,11 @@ def test_internal_html_check_existing_route_uses_workspace_defaults(
                         {
                             "acpt_no": "20250101000001",
                             "selected_main_doc_no": "20250101000999",
+                            "docs": [{
+                                "select_id": "mainDoc",
+                                "doc_no": "20250101000999",
+                                "selected": True,
+                            }],
                             "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3297,6 +3325,11 @@ def test_internal_html_check_existing_finds_yearly_output(
                         {
                             "acpt_no": "20250101000001",
                             "selected_main_doc_no": "20250101000999",
+                            "docs": [{
+                                "select_id": "mainDoc",
+                                "doc_no": "20250101000999",
+                                "selected": True,
+                            }],
                             "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],
@@ -3342,6 +3375,11 @@ def test_internal_html_trust_existing_route_creates_hash_baseline(
                     {
                         "acpt_no": "20250101000001",
                         "selected_main_doc_no": "20250101000999",
+                        "docs": [{
+                            "select_id": "mainDoc",
+                            "doc_no": "20250101000999",
+                            "selected": True,
+                        }],
                         "metadata": {"disclosed_at": "2025-01-01"},
                     }
                 ],

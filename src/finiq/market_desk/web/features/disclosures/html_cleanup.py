@@ -51,18 +51,11 @@ def _load_internal_html_integrity_source(
             **source_json,
             "records": [records_by_acpt_no[acpt_no] for acpt_no in child_acpt_numbers],
         }
-    if body.get("parent_mode") not in (None, ""):
-        targets, source_json = (
-            internal_html_download._collect_internal_targets_from_compressed_payload(
-                source_json
-            )
+    targets, source_json = (
+        internal_html_download._collect_internal_targets_from_compressed_payload(
+            source_json
         )
-    else:
-        targets, source_json = (
-            internal_html_download._collect_internal_cleanup_targets_from_compressed_payload(
-                source_json
-            )
-        )
+    )
 
     acpt_numbers = [target["acpt_no"] for target in targets]
     target_years = {target["acpt_no"]: target["year"] for target in targets}
@@ -452,7 +445,38 @@ def _inspect_all_disclosure_html_payload(
             create_workspace=False,
         )
         try:
-            if parent_mode:
+            empty_completed_filter = False
+            filtered_path = ""
+            if preset.get("status") == "completed":
+                filtered_json, filtered_path = _load_workspace_filtered_payload(
+                    payload
+                )
+                empty_completed_filter = not collect_acpt_numbers_from_json(
+                    filtered_json
+                )
+            if empty_completed_filter:
+                inspected = {
+                    "format": "kind_disclosure_html_existing_check_v1",
+                    "source_type": (
+                        "content"
+                        if workflow_kind == "internal_html_download"
+                        else "external"
+                    ),
+                    "source_path": filtered_path,
+                    "output_directory": str(payload["output_directory"]),
+                    "requested_count": 0,
+                    "existing_target_html_count": 0,
+                    "download_required_target_html_count": 0,
+                    "missing_target_html_count": 0,
+                    "invalid_target_html_count": 0,
+                    "hash_mismatch_target_html_count": 0,
+                    "hash_unverified_target_html_count": 0,
+                    "source_unavailable_target_html_count": 0,
+                    "deletion_candidate_count": 0,
+                    "has_existing": False,
+                    "empty_filter_result": True,
+                }
+            elif parent_mode:
                 owner = owner_scans.get(parent_mode)
                 if owner is None:
                     raise ValueError(
@@ -708,30 +732,64 @@ def create_internal_html_integrity_baseline_payload(
 
     source_integrity = output_summary.pop("_target_integrity_by_acpt_no")
     selected_main_doc_numbers = _selected_main_doc_numbers(source_json)
-    unsupported_placeholders = _unsupported_source_unavailable_acpt_numbers(
-        acpt_numbers=baseline_acpt_numbers,
-        selected_doc_numbers=selected_main_doc_numbers,
-        integrity_by_acpt_no=source_integrity,
-    )
-    if unsupported_placeholders:
+    (
+        existing_manifest_format,
+        _existing_source_fingerprint,
+        _existing_integrity,
+        existing_selected_doc_numbers,
+    ) = _load_html_manifest_integrity(resolved_output_directory)
+    changed_selected_documents = [
+        acpt_no
+        for acpt_no in baseline_acpt_numbers
+        if acpt_no in existing_selected_doc_numbers
+        and existing_selected_doc_numbers[acpt_no]
+        != selected_main_doc_numbers.get(acpt_no)
+    ]
+    if changed_selected_documents:
         raise ValueError(
-            "unsupported source-unavailable placeholder for acpt_no="
-            + ", ".join(unsupported_placeholders[:10])
+            "selected_main_doc_no changed for existing internal HTML: "
+            + ", ".join(changed_selected_documents[:10])
         )
+    recorded_source_unavailable = _load_html_manifest_source_unavailable(
+        resolved_output_directory
+    )
     source_unavailable: dict[str, dict[str, str]] = {}
     for acpt_no in baseline_acpt_numbers:
         selected_doc_no = selected_main_doc_numbers.get(acpt_no)
-        placeholder = _internal_html_source_unavailable_placeholder_from_integrity(
-            acpt_no=acpt_no,
-            doc_no=selected_doc_no or "",
-            integrity=source_integrity.get(acpt_no),
+        target_path = _target_html_path(
+            resolved_output_directory,
+            acpt_no,
+            target_years=target_years,
         )
+        target_content = target_path.read_bytes()
+        placeholder = _internal_html_source_unavailable_placeholder(target_content)
         if placeholder is None:
+            if b"<!-- FINIQ_SOURCE_UNAVAILABLE " in target_content:
+                raise ValueError(
+                    "unsupported source-unavailable placeholder for acpt_no="
+                    f"{acpt_no}"
+                )
             continue
+        if placeholder["acpt_no"] != acpt_no:
+            raise ValueError(
+                "source-unavailable placeholder receipt number does not match "
+                f"filename: {target_path}"
+            )
         if placeholder["doc_no"] != selected_doc_no:
             raise ValueError(
                 "source-unavailable placeholder doc_no does not match "
                 f"selected_main_doc_no for acpt_no={acpt_no}"
+            )
+        recorded_marker = recorded_source_unavailable.get(acpt_no)
+        if (
+            existing_manifest_format != HTML_MANIFEST_FORMAT_V3
+            or recorded_marker is None
+            or recorded_marker.get("doc_no") != placeholder["doc_no"]
+            or recorded_marker.get("reason") != placeholder["reason"]
+        ):
+            raise ValueError(
+                "source-unavailable placeholder has no matching manifest provenance: "
+                f"acpt_no={acpt_no}"
             )
         source_unavailable[acpt_no] = {
             "doc_no": placeholder["doc_no"],

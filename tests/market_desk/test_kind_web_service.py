@@ -356,11 +356,24 @@ def _external_workspace_body(
             for disclosure in source_json["disclosures"]
             if isinstance(disclosure, dict)
         ]
+    filtered = {
+        "format": "kind_disclosure_filter_v1",
+        **normalized_source_json,
+    }
     filtered_path.write_text(
+        json.dumps(filtered, ensure_ascii=False), encoding="utf-8"
+    )
+    filtered_path.with_name("filter.json").write_text(
         json.dumps(
             {
-                "format": "kind_disclosure_filter_v1",
-                **normalized_source_json,
+                "format": "finiq_disclosure_filter_workflow",
+                "mode": "bond_issuance",
+                "parent_mode": None,
+                "status": "completed",
+                "result_file": filtered_path.name,
+                "result_fingerprint": html_common_module._source_json_fingerprint(
+                    filtered
+                ),
             },
             ensure_ascii=False,
         ),
@@ -3487,13 +3500,27 @@ def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder
     ):
         filtered_path = data_root / "03-filter" / mode / "filtered.json"
         filtered_path.parent.mkdir(parents=True)
+        filtered = {
+            "format": "kind_disclosure_filter_v1",
+            "disclosures": [
+                {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
+            ],
+        }
         filtered_path.write_text(
+            json.dumps(filtered),
+            encoding="utf-8",
+        )
+        filtered_path.with_name("filter.json").write_text(
             json.dumps(
                 {
-                    "format": "kind_disclosure_filter_v1",
-                    "disclosures": [
-                        {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
-                    ],
+                    "format": "finiq_disclosure_filter_workflow",
+                    "mode": mode,
+                    "parent_mode": None,
+                    "status": "completed",
+                    "result_file": filtered_path.name,
+                    "result_fingerprint": (
+                        html_common_module._source_json_fingerprint(filtered)
+                    ),
                 }
             ),
             encoding="utf-8",
@@ -4548,6 +4575,25 @@ def test_all_external_html_inspection_reuses_parent_file_hashes_for_derived_filt
         ),
         encoding="utf-8",
     )
+    child_payload = json.loads(child_path.read_text(encoding="utf-8"))
+    child_path.with_name("filter.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_filter_workflow",
+                "mode": "bond_issuance_kosdaq",
+                "parent_mode": "bond_issuance",
+                "parent_result_fingerprint": child_payload[
+                    "parent_result_fingerprint"
+                ],
+                "status": "completed",
+                "result_file": child_path.name,
+                "result_fingerprint": html_common._source_json_fingerprint(
+                    child_payload
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
 
     output_directory = data_root / "04-external-html-download" / "bond_issuance"
     (output_directory / "2025").mkdir(parents=True)
@@ -4653,6 +4699,25 @@ def test_all_internal_html_inspection_reuses_parent_file_hashes_for_derived_filt
                     parent_payload
                 ),
                 "disclosures": [parent_payload["disclosures"][0]],
+            }
+        ),
+        encoding="utf-8",
+    )
+    child_payload = json.loads(child_path.read_text(encoding="utf-8"))
+    child_path.with_name("filter.json").write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_filter_workflow",
+                "mode": "bond_issuance_kosdaq",
+                "parent_mode": "bond_issuance",
+                "parent_result_fingerprint": child_payload[
+                    "parent_result_fingerprint"
+                ],
+                "status": "completed",
+                "result_file": child_path.name,
+                "result_fingerprint": html_common._source_json_fingerprint(
+                    child_payload
+                ),
             }
         ),
         encoding="utf-8",
@@ -8374,7 +8439,8 @@ def test_html_section_worker_count_defaults_to_cpu_cap_and_accepts_payload_value
 def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path: Path) -> None:
     input_directory = tmp_path / "viewer_html"
     (input_directory / "2025").mkdir(parents=True)
-    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+    manifest_path = input_directory / "kind_disclosure_html_manifest.json"
+    manifest_path.write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_html_manifest_v1",
@@ -8393,7 +8459,8 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         ),
         encoding="utf-8",
     )
-    (input_directory / "2025" / "AB202501010001.html").write_text(
+    html_path = input_directory / "2025" / "AB202501010001.html"
+    html_path.write_text(
         """
         <html><body>
           <meta name="description" content="대한민국 대표 기업공시채널 KIND" />
@@ -8428,6 +8495,13 @@ def test_compress_disclosure_external_html_payload_writes_compact_json(tmp_path:
         </body></html>
         """,
         encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["disclosures"][0].update(
+        html_common_module._html_file_integrity(html_path)
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
     )
     output_directory = tmp_path / "compressed"
 
@@ -8645,7 +8719,8 @@ def test_compress_disclosure_external_html_payload_rejects_missing_manifest_meta
 def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_path: Path) -> None:
     input_directory = tmp_path / "viewer_html"
     (input_directory / "2025").mkdir(parents=True)
-    (input_directory / "kind_disclosure_html_manifest.json").write_text(
+    manifest_path = input_directory / "kind_disclosure_html_manifest.json"
+    manifest_path.write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_html_manifest_v1",
@@ -8679,6 +8754,17 @@ def test_compress_disclosure_external_html_payload_accepts_parallel_workers(tmp_
             """,
             encoding="utf-8",
         )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for disclosure in manifest["disclosures"]:
+        acpt_no = disclosure["acpt_no"]
+        disclosure.update(
+            html_common_module._html_file_integrity(
+                input_directory / "2025" / f"{acpt_no}.html"
+            )
+        )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
 
     payload = compress_disclosure_external_html_payload(
         {
@@ -8709,26 +8795,18 @@ def test_compress_disclosure_external_html_payload_rejects_source_directory(
 
 def test_check_disclosure_external_html_output_directory_uses_compressed_json_year(
     tmp_path: Path,
-    monkeypatch,
 ) -> None:
-    def fail_full_target_scan(*args, **kwargs):
-        raise AssertionError("existing checks should not scan compressed JSON docs for doc_no")
-
-    monkeypatch.setattr(
-        "finiq.market_desk.web.features.disclosures.internal_html_download._collect_internal_targets_from_compressed_payload",
-        fail_full_target_scan,
-    )
-
     compressed_path = tmp_path / "compressed-external-html.json"
     compressed_path.write_text(
         json.dumps(
             {
                 "format": "finiq_disclosure_external_html_docs_v1",
                 "records": [
-                    {
-                        "acpt_no": "20250101000001",
-                        "metadata": {"disclosed_at": "2025-01-01"},
-                    }
+                        {
+                            "acpt_no": "20250101000001",
+                            **_selected_main_doc_fields("20250101000999"),
+                            "metadata": {"disclosed_at": "2025-01-01"},
+                        }
                 ],
             }
         ),

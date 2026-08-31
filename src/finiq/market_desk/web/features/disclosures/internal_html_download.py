@@ -299,19 +299,6 @@ def _collect_internal_targets_from_compressed_payload(
     return targets, payload
 
 
-def _collect_internal_cleanup_targets_from_compressed_payload(
-    payload: dict[str, Any],
-) -> tuple[list[dict[str, str]], Any]:
-    targets: list[dict[str, str]] = []
-    for record, acpt_no in _validated_compressed_records(payload):
-        year = _compressed_record_year(record, acpt_no)
-        targets.append({"acpt_no": acpt_no, "doc_no": "", "year": year})
-    if not targets:
-        msg = "No internal HTML targets found in compressed external HTML JSON"
-        raise ValueError(msg)
-    return targets, payload
-
-
 def _internal_html_virtual_computer_worker(
     computer: KindVirtualComputer,
     targets: list[dict[str, str]],
@@ -1119,7 +1106,10 @@ def download_disclosure_internal_html_payload(
                     ):
                         raise InterruptedError("internal HTML revalidation cancelled")
 
-                with requests.Session() as revalidation_session:
+                with create_kind_computer_session(
+                    KindVirtualComputer(index=0, proxy_url=None),
+                    pool_size=1,
+                ) as revalidation_session:
                     for target in revalidation_targets:
                         acpt_no = target["acpt_no"]
                         doc_no = target["doc_no"]
