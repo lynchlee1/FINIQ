@@ -1187,6 +1187,22 @@ export function DisclosureHtmlDownloadPageView({ variant = "external" }: { varia
                     : ["05-internal-html-download"]
                 }
                 disabled={isJobActive || !!activeCancelToken}
+                onChanged={() => {
+                  inspectAbortControllerRef.current?.abort();
+                  inspectAbortControllerRef.current = null;
+                  setInspectRunning(false);
+                  setExistingData(null);
+                  setAllModeSaveInspectionData(null);
+                  setExistingCheckError("");
+                  setExistingCheckCompleted(false);
+                  setCompressionInspectionData(null);
+                  setCompressionInspectionError("");
+                  setCompressionInspectionCompleted(false);
+                  setLastInspectionCandidateCount(0);
+                  setLastInspectionResult(null);
+                  setDeleteConfirmed(false);
+                  setDeleteConfirmationText("");
+                }}
                 onError={handlePathError}
               />
               {isExternalCompressMode ? (

@@ -22,6 +22,7 @@ from .workflow import (
     validate_download_directory_page_size,
     validate_downloaded_result_page,
     validate_kind_workflow_input_snapshot,
+    verify_download_first_page_consistency,
 )
 
 __all__ = [
@@ -46,4 +47,5 @@ __all__ = [
     "validate_download_directory_page_size",
     "validate_downloaded_result_page",
     "validate_kind_workflow_input_snapshot",
+    "verify_download_first_page_consistency",
 ]

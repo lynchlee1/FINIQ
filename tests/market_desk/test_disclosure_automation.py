@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -149,6 +150,26 @@ def test_stage_hash_ignores_operational_settings_but_keeps_page_size(
     ) != automation._profile_semantic_hash(
         normalize_automation_profile(changed_page_size)
     )
+
+
+def test_stage_five_output_fingerprint_uses_file_content(tmp_path: Path) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    html_path = (
+        tmp_path
+        / "05-internal-html-download"
+        / "bond_issuance"
+        / "2025"
+        / "20250101000001.html"
+    )
+    html_path.parent.mkdir(parents=True)
+    html_path.write_bytes(b"AAAA")
+    original_mtime_ns = html_path.stat().st_mtime_ns
+    before = automation._stage_output_fingerprint(profile, 5)
+
+    html_path.write_bytes(b"BBBB")
+    os.utime(html_path, ns=(original_mtime_ns, original_mtime_ns))
+
+    assert automation._stage_output_fingerprint(profile, 5) != before
 
 
 @pytest.mark.parametrize("trigger", ["sync", "resume"])
@@ -524,6 +545,42 @@ def test_stage_five_uses_official_mode_directory(
     assert captured_body["output_directory"] == str(
         tmp_path / "05-internal-html-download" / "bond_issuance"
     )
+
+
+@pytest.mark.parametrize(
+    "integrity_counts",
+    [
+        {"hash_mismatch_target_html_count": 1},
+        {"hash_unverified_target_html_count": 1},
+        {"hash_verified_target_html_count": 0},
+    ],
+)
+def test_stage_five_inspection_rejects_untrusted_html(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    integrity_counts: dict[str, int],
+) -> None:
+    profile = normalize_automation_profile(_profile(tmp_path))
+    checked = {
+        "requested_count": 1,
+        "existing_target_html_count": 1,
+        "missing_target_html_count": 0,
+        "invalid_target_html_count": 0,
+        "unexpected_file_count": 0,
+        "hash_mismatch_target_html_count": 0,
+        "hash_unverified_target_html_count": 0,
+        "hash_verified_target_html_count": 1,
+        **integrity_counts,
+    }
+    monkeypatch.setattr(
+        automation,
+        "check_disclosure_html_output_directory_payload",
+        lambda _body: checked,
+    )
+
+    result = automation._inspect_detail_internal_html(profile)
+
+    assert result["confirmed"] is False
 
 
 def test_stage_six_uses_official_mode_directories(

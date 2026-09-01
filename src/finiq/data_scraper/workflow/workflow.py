@@ -10,6 +10,7 @@ from datetime import date
 import json
 import math
 from pathlib import Path
+import tempfile
 import threading
 from typing import Any
 
@@ -1207,6 +1208,23 @@ def inspect_download_directory_pages(
     }
 
 
+def verify_download_first_page_consistency(
+    first_page: str | Path,
+    verification_page: str | Path,
+) -> None:
+    """Fail when the first result page changed during a full download."""
+    first_bytes = Path(first_page).read_bytes()
+    verification_bytes = Path(verification_page).read_bytes()
+    if (
+        pagination_info(first_bytes) != pagination_info(verification_bytes)
+        or disclosure_rows(first_bytes) != disclosure_rows(verification_bytes)
+    ):
+        raise ValueError(
+            "KIND 목록이 다운로드 중 변경되었습니다. 처음과 마지막 1페이지의 "
+            "페이지네이션 또는 공시 행이 다르므로 완료 처리하지 않습니다."
+        )
+
+
 def ensure_download_directory_integrity(
     output_directory: str | Path,
     *,
@@ -1456,6 +1474,11 @@ class KindWorkflow:
     ) -> dict[str, Any]:
         """저장된 입력값으로 KIND raw response를 폴더에 저장한다."""
         configured_input = self._require_input()
+        if configured_input.start_page != 1:
+            raise ValueError(
+                "KindWorkflow.save_search_results requires a full download "
+                "starting at page 1"
+            )
         resolved_input_snapshot_path = (
             configured_input.output_directory / "kind_workflow.input.json"
             if input_snapshot_path is None
@@ -1466,6 +1489,21 @@ class KindWorkflow:
             requested_page_size=configured_input.page_size,
             input_snapshot_path=resolved_input_snapshot_path,
         )
+        existing_pages = _iter_saved_result_pages(
+            configured_input.output_directory
+        )
+        if existing_pages:
+            existing_download = inspect_download_directory_pages(
+                configured_input.output_directory,
+                expected_page_size=configured_input.page_size,
+                require_complete=True,
+                validation_parallelism=max_workers,
+            )
+            if configured_input.end_page != existing_download["total_pages"]:
+                raise ValueError(
+                    "KindWorkflow.save_search_results requires the configured "
+                    "page range to cover the existing full pagination"
+                )
         validate_kind_workflow_input_snapshot(configured_input.to_dict())
         resolved_checkpoint_path = (
             configured_input.output_directory / "kind_workflow.checkpoint.json"
@@ -1506,27 +1544,93 @@ class KindWorkflow:
             cancel_check=cancel_check,
             max_workers=max_workers,
         )
-        checkpoint.completed = not (
-            cancel_check is not None and cancel_check()
-        )
-        if checkpoint.completed:
-            final_page = configured_input.end_page
-            final_path = (
-                configured_input.output_directory
-                / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=final_page)
-            ).resolve()
-            if final_path.exists():
-                checkpoint.last_saved_file = final_path.relative_to(
-                    configured_input.output_directory
-                ).as_posix()
-                checkpoint.last_saved_page = final_page
-                checkpoint.last_request_data = list(
-                    self.build_request_data(page_number=final_page)
+        cancelled = cancel_check is not None and cancel_check()
+        if not cancelled:
+            try:
+                completed_download = inspect_download_directory_pages(
+                    configured_input.output_directory,
+                    expected_page_size=configured_input.page_size,
+                    require_complete=True,
+                    validation_parallelism=max_workers,
                 )
-        if checkpoint.completed:
-            resolved_input_snapshot_path = self.save_input_snapshot(
-                resolved_input_snapshot_path
-            )
+                if configured_input.end_page != completed_download["total_pages"]:
+                    raise ValueError(
+                        "KindWorkflow.save_search_results requires the configured "
+                        "page range to cover the actual full pagination"
+                    )
+                with tempfile.TemporaryDirectory(
+                    dir=configured_input.output_directory.parent,
+                    prefix=f".{configured_input.output_directory.name}.kind-first-page-check-",
+                ) as verification_raw:
+                    verification_directory = Path(verification_raw)
+                    download_pages(
+                        output_directory=verification_directory,
+                        request_headers=configured_input.request_headers,
+                        start_date=configured_input.start_date,
+                        end_date=configured_input.end_date,
+                        start_page=1,
+                        end_page=1,
+                        search_filters=configured_input.search_filters,
+                        disclosure_type_groups=configured_input.disclosure_type_groups,
+                        last_report_only=configured_input.last_report_only,
+                        include_previous_disclosures=(
+                            configured_input.include_previous_disclosures
+                        ),
+                        page_size=configured_input.page_size,
+                        wait_seconds_between_requests=(
+                            configured_input.wait_seconds_between_requests
+                        ),
+                        timeout=configured_input.timeout,
+                        session=session,
+                        progress_callback=progress_callback,
+                        saved_file_validator=make_page_size_integrity_validator(
+                            expected_page_size=configured_input.page_size
+                        ),
+                        cancel_check=cancel_check,
+                        max_workers=1,
+                    )
+                    cancelled = cancel_check is not None and cancel_check()
+                    if not cancelled:
+                        first_page = (
+                            configured_input.output_directory
+                            / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=1)
+                        )
+                        verification_page = (
+                            verification_directory
+                            / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=1)
+                        )
+                        verify_download_first_page_consistency(
+                            first_page,
+                            verification_page,
+                        )
+
+                if not cancelled:
+                    final_page = int(completed_download["total_pages"])
+                    checkpoint.saved_files = [
+                        path.relative_to(
+                            configured_input.output_directory
+                        ).as_posix()
+                        for path in sorted(
+                            configured_input.output_directory.glob("*.body")
+                        )
+                    ]
+                    checkpoint.last_saved_file = (
+                        SEARCH_RESULTS_FILENAME_TEMPLATE.format(
+                            page_number=final_page
+                        )
+                    )
+                    checkpoint.last_saved_page = final_page
+                    checkpoint.last_request_data = list(
+                        self.build_request_data(page_number=final_page)
+                    )
+                    resolved_input_snapshot_path = self.save_input_snapshot(
+                        resolved_input_snapshot_path
+                    )
+                    checkpoint.completed = True
+            except Exception:
+                checkpoint.completed = False
+                _write_json_file(resolved_checkpoint_path, checkpoint.to_dict())
+                raise
         _write_json_file(resolved_checkpoint_path, checkpoint.to_dict())
         return {
             "input": configured_input.to_dict(),

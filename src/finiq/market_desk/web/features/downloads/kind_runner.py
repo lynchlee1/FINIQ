@@ -19,7 +19,6 @@ from finiq.data_scraper.core.client import (
     download_pages,
 )
 from finiq.data_scraper.core.constants import DEFAULT_REQUEST_HEADERS
-from finiq.data_scraper.parse import disclosure_rows, pagination_info
 from finiq.data_scraper.storage.result_files import result_page_number
 from finiq.data_scraper.workflow import (
     KindWorkflow,
@@ -27,6 +26,7 @@ from finiq.data_scraper.workflow import (
     inspect_download_directory_pages,
     make_page_size_integrity_validator,
     validate_kind_workflow_input_snapshot,
+    verify_download_first_page_consistency,
 )
 
 from finiq.market_desk.web.features.downloads.kind_common import *
@@ -165,26 +165,6 @@ def _configure_full_download_workflow(
     return workflow
 
 
-def _verify_first_page_consistency(
-    first_page: Path,
-    verification_page: Path,
-) -> None:
-    first_bytes = first_page.read_bytes()
-    verification_bytes = verification_page.read_bytes()
-    first_pagination = pagination_info(first_bytes)
-    verification_pagination = pagination_info(verification_bytes)
-    first_rows = disclosure_rows(first_bytes)
-    verification_rows = disclosure_rows(verification_bytes)
-    if (
-        first_pagination != verification_pagination
-        or first_rows != verification_rows
-    ):
-        raise ValueError(
-            "KIND 목록이 다운로드 중 변경되었습니다. 처음과 마지막 1페이지의 "
-            "페이지네이션 또는 공시 행이 다르므로 새 결과를 게시하지 않습니다."
-        )
-
-
 def _publish_staged_download(
     staging_directory: Path,
     output_directory: Path,
@@ -286,8 +266,30 @@ def _run_auto_download_staged(
             wait_seconds=wait_seconds,
             timeout=timeout,
         )
-        probe.save_search_results(
+        probe_input = probe.get_input()
+        probe.save_checkpoint(checkpoint_path)
+        download_pages(
+            output_directory=staging_directory,
+            request_headers=probe_input.request_headers,
+            start_date=probe_input.start_date,
+            end_date=probe_input.end_date,
+            start_page=1,
+            end_page=1,
+            search_filters=probe_input.search_filters,
+            disclosure_type_groups=probe_input.disclosure_type_groups,
+            last_report_only=probe_input.last_report_only,
+            include_previous_disclosures=probe_input.include_previous_disclosures,
+            page_size=probe_input.page_size,
+            wait_seconds_between_requests=wait_seconds,
+            timeout=timeout,
             progress_callback=progress_callback,
+            saved_file_validator=make_page_size_integrity_validator(
+                expected_page_size=page_size,
+            ),
+            saved_file_callback=probe._make_saved_file_callback(
+                checkpoint_path,
+                None,
+            ),
             cancel_check=cancel_check,
             max_workers=1,
         )
@@ -402,7 +404,7 @@ def _run_auto_download_staged(
         )
         if cancel_check is not None and cancel_check():
             raise DownloadCancelled("download job cancelled")
-        _verify_first_page_consistency(
+        verify_download_first_page_consistency(
             staging_directory / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=1),
             verification_directory
             / SEARCH_RESULTS_FILENAME_TEMPLATE.format(page_number=1),

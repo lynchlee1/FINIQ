@@ -15,6 +15,7 @@ from typing import Any, Callable
 from finiq.concurrency import resolve_worker_count
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     atomic_write_json,
+    resolve_disclosure_workspace,
     validate_workspace_mode,
 )
 from finiq.market_desk.web.features.disclosures.html_common import (
@@ -745,22 +746,41 @@ def _derived_allowed_acpt_numbers(
     mode: str,
     filtered_metadata_path: Path | None,
 ) -> set[str] | None:
-    if body.get("parent_mode") in (None, ""):
-        return None
+    parent_mode = body.get("parent_mode")
+    derived = parent_mode not in (None, "")
     if filtered_metadata_path is None:
-        raise ValueError("filtered_metadata_path is required for a derived filter")
+        if derived:
+            raise ValueError("filtered_metadata_path is required for a derived filter")
+        return None
+    data_root = str(body.get("data_root") or "").strip()
+    if not data_root:
+        if derived:
+            raise ValueError("data_root is required for a derived filter")
+        return None
+    workspace = resolve_disclosure_workspace(data_root)
+    workspace_filtered_path = (
+        workspace.filter_mode(mode, parent_mode=parent_mode) / "filtered.json"
+    ).resolve()
+    if filtered_metadata_path != workspace_filtered_path:
+        if derived:
+            raise ValueError(
+                "derived filter filtered_metadata_path does not match its workspace path"
+            )
+        return None
     filtered_payload, validated_filtered_path = _load_workspace_filtered_payload(
         {
-            "data_root": body.get("data_root"),
+            "data_root": data_root,
             "mode": mode,
-            "parent_mode": body.get("parent_mode"),
+            "parent_mode": parent_mode,
         }
     )
-    if Path(validated_filtered_path) != filtered_metadata_path:
+    if Path(validated_filtered_path).resolve() != filtered_metadata_path:
         raise ValueError(
-            "derived filter filtered_metadata_path does not match its workspace path"
+            "filtered_metadata_path does not match its workspace path"
         )
-    return set(collect_acpt_numbers_from_json(filtered_payload))
+    if derived:
+        return set(collect_acpt_numbers_from_json(filtered_payload))
+    return None
 
 
 def _build_parse_request(

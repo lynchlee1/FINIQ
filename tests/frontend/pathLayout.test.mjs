@@ -194,6 +194,7 @@ test("numbered disclosure pages manage their own stage storage link", async () =
   assert.match(component, /\/api\/disclosures\/workspace\/stage-links/);
   assert.match(component, /action: "set"/);
   assert.match(component, /action: "remove"/);
+  assert.match(component, /await fetchSettings\(true\)/);
   assert.match(component, /단계별 저장 위치/);
   assert.match(component, /status\.linked && status\.valid/);
   assert.match(component, /설정 오류/);
@@ -207,6 +208,11 @@ test("numbered disclosure pages manage their own stage storage link", async () =
   assert.match(sectionResults, /stages=\{\["06-sections"\]\}/);
   assert.match(parse, /stages=\{\["07-converted"\]\}/);
   assert.match(automation, /<DisclosureStageStorageSettings[\s\S]*?setWorkspaceInspections\(\{\}\)/);
+  for (const source of [download, table, filter, htmlDownload, sectionResults, parse, automation]) {
+    assert.match(source, /<DisclosureStageStorageSettings[\s\S]*?onChanged=/);
+  }
+  assert.match(download, /data_root: payload\.data_root/);
+  assert.match(download, /separate_output_directory: payload\.separate_output_directory/);
 });
 
 test("html section split keeps job status only in the action dock", async () => {

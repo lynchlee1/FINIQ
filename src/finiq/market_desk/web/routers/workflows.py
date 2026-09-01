@@ -694,7 +694,9 @@ def create_workflows_router(
 
     @router.post("/api/disclosures/html/parse/bond-summary")
     async def bond_parse_summary_route(payload: dict[str, Any]):
-        return build_bond_parse_summary_payload(payload)
+        return build_bond_parse_summary_payload(
+            apply_workspace_defaults("parse_read", payload, create_workspace=False)
+        )
 
     @router.post("/api/disclosures/graph/build")
     async def build_disclosure_graph_route(payload: dict[str, Any]):

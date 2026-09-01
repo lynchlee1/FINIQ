@@ -114,7 +114,7 @@ def _validate_sqlite_manifest_fields(
     manifest_path: Path,
     manifest: dict[str, Any],
 ) -> None:
-    allowed_fields = {
+    required_fields = {
         "format",
         "schema_version",
         "generated_at",
@@ -125,7 +125,7 @@ def _validate_sqlite_manifest_fields(
         "shards",
         "content_fingerprint",
     }
-    allowed_summary_fields = {
+    required_summary_fields = {
         "companies",
         "source_rows",
         "duplicate_rows",
@@ -133,7 +133,7 @@ def _validate_sqlite_manifest_fields(
         "unlinked_disclosures",
         "shards",
     }
-    allowed_page_fields = {
+    required_page_fields = {
         "period_start",
         "period_end",
         "source_page",
@@ -141,7 +141,7 @@ def _validate_sqlite_manifest_fields(
         "written_rows",
         "duplicate_rows",
     }
-    allowed_shard_fields = {
+    required_shard_fields = {
         "year",
         "companies",
         "disclosures",
@@ -149,27 +149,50 @@ def _validate_sqlite_manifest_fields(
         "indexes",
         "fts_enabled",
     }
-    field_groups = [
-        ("manifest", manifest, allowed_fields),
-        ("manifest.summary", manifest.get("summary"), allowed_summary_fields),
-    ]
+    field_groups = [("manifest", manifest, required_fields)]
+    summary = manifest.get("summary")
+    field_groups.append(("manifest.summary", summary, required_summary_fields))
+
+    pages = manifest.get("pages")
+    if not isinstance(pages, list):
+        raise ValueError(
+            f"SQLite manifest pages must be a list: {manifest_path}"
+        )
     field_groups.extend(
-        (f"manifest.pages[{index}]", page, allowed_page_fields)
-        for index, page in enumerate(manifest.get("pages") or [])
+        (f"manifest.pages[{index}]", page, required_page_fields)
+        for index, page in enumerate(pages)
     )
+
+    shards = manifest.get("shards")
+    if not isinstance(shards, list):
+        raise ValueError(
+            f"SQLite manifest shards must be a list: {manifest_path}"
+        )
     field_groups.extend(
-        (f"manifest.shards[{index}]", shard, allowed_shard_fields)
-        for index, shard in enumerate(manifest.get("shards") or [])
+        (f"manifest.shards[{index}]", shard, required_shard_fields)
+        for index, shard in enumerate(shards)
     )
-    for location, value, allowed in field_groups:
+
+    for location, value, required in field_groups:
         if not isinstance(value, dict):
-            continue
-        unexpected = sorted(set(value).difference(allowed))
-        if unexpected:
             raise ValueError(
-                "SQLite manifest 스키마 4의 필드가 저장 계약과 다릅니다: "
+                "SQLite manifest 스키마 4의 필드 그룹은 객체여야 합니다: "
+                f"manifest={manifest_path}, location={location}"
+            )
+        missing = sorted(required.difference(value))
+        if missing:
+            raise ValueError(
+                "SQLite manifest 스키마 4에 필수 필드가 없습니다: "
                 f"manifest={manifest_path}, location={location}, "
-                f"unexpected={unexpected}"
+                f"missing={missing}"
+            )
+
+    for field in ("generated_at", "source_type", "table_name"):
+        value = manifest[field]
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                "SQLite manifest 스키마 4의 필수 문자열 필드가 올바르지 않습니다: "
+                f"manifest={manifest_path}, field={field}"
             )
 
 
@@ -185,22 +208,18 @@ def _validate_sqlite_shard_structure(
     unlinked_disclosures: int,
 ) -> None:
     columns = _sqlite_table_columns(connection, table_name)
-    expected_columns = {
-        "id",
-        *_SQLITE_CONTENT_FINGERPRINT_FIELDS,
-        "source_page",
-    }
-    if columns != expected_columns:
-        unexpected_columns = sorted(columns.difference(expected_columns))
-        if any(_is_persisted_path_key(column) for column in unexpected_columns):
-            raise ValueError(
-                "연도별 SQLite 공시 행에 경로 열을 저장할 수 없습니다: "
-                f"파일={shard_path}, 열={unexpected_columns}"
-            )
+    expected_columns = {"id", *_SQLITE_CONTENT_FINGERPRINT_FIELDS, "source_page"}
+    missing_columns = sorted(expected_columns.difference(columns))
+    if missing_columns:
         raise ValueError(
-            "연도별 SQLite 공시 열이 저장 계약과 다릅니다: "
-            f"파일={shard_path}, expected={sorted(expected_columns)}, "
-            f"actual={sorted(columns)}"
+            "연도별 SQLite 공시 표에 필수 열이 없습니다: "
+            f"파일={shard_path}, 열={missing_columns}"
+        )
+    extension_columns = sorted(columns.difference(expected_columns))
+    if any(_is_persisted_path_key(column) for column in extension_columns):
+        raise ValueError(
+            "연도별 SQLite 공시 행에 경로 열을 저장할 수 없습니다: "
+            f"파일={shard_path}, 열={extension_columns}"
         )
 
     shard_year = str(shard.get("year") or "").strip()
@@ -236,7 +255,7 @@ def _validate_sqlite_shard_structure(
         "format": "finiq_disclosure_table_sqlite",
         "shard_format": "finiq_disclosure_table_sqlite_shard",
         "schema_version": "4",
-        "source_type": str(manifest.get("source_type") or ""),
+        "source_type": manifest["source_type"].strip(),
         "table_name": table_name,
         "shard_year": shard_year,
         "companies": str(companies),
@@ -244,22 +263,21 @@ def _validate_sqlite_shard_structure(
         "unlinked_disclosures": str(unlinked_disclosures),
         "fts_enabled": "true",
     }
-    unexpected_metadata = sorted(set(metadata).difference(expected_metadata))
-    if any(_is_persisted_path_key(key) for key in unexpected_metadata):
+    extension_metadata = sorted(set(metadata).difference(expected_metadata))
+    if any(_is_persisted_path_key(key) for key in extension_metadata):
         raise ValueError(
             "연도별 SQLite table_metadata에 경로를 저장할 수 없습니다: "
-            f"파일={shard_path}, keys={unexpected_metadata}"
+            f"파일={shard_path}, keys={extension_metadata}"
         )
     mismatched_metadata = {
         key: {"expected": value, "actual": metadata.get(key)}
         for key, value in expected_metadata.items()
         if metadata.get(key) != value
     }
-    if mismatched_metadata or unexpected_metadata:
+    if mismatched_metadata:
         raise ValueError(
             "연도별 SQLite 파일의 table_metadata가 변환 계약과 다릅니다: "
-            f"파일={shard_path}, 불일치={mismatched_metadata}, "
-            f"추가={unexpected_metadata}"
+            f"파일={shard_path}, 불일치={mismatched_metadata}"
         )
 
     expected_index_specs = _disclosure_index_specs(table_name)
@@ -360,11 +378,9 @@ def _validate_sqlite_manifest_counts(
             f"{persisted_path}"
         )
     _validate_sqlite_manifest_fields(manifest_path, manifest)
-    table_name = (
-        str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
-    )
+    table_name = manifest["table_name"].strip()
     quoted_table = _quoted_sqlite_identifier(table_name)
-    shards = list(manifest.get("shards") or [])
+    shards = list(manifest["shards"])
     worker_count = _resolve_filter_workers(filter_workers, len(shards))
 
     def validate_shard(shard: dict[str, Any]) -> tuple[int, int]:
@@ -528,14 +544,12 @@ def _iter_sqlite_manifest_disclosure_records(
 ) -> Any:
     if offset < 0:
         raise ValueError("SQLite disclosure offset must be >= 0")
-    table_name = (
-        str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
-    )
+    table_name = str(manifest["table_name"]).strip()
     quoted_table = _quoted_sqlite_identifier(table_name)
     remaining_offset = offset
     seen_acpt_numbers: set[str] = set()
     for shard in sorted(
-        list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")
+        list(manifest["shards"]), key=lambda item: str(item.get("year") or "")
     ):
         shard_disclosures = int(shard.get("disclosures") or 0)
         if acpt_numbers is None and remaining_offset >= shard_disclosures:
@@ -677,7 +691,7 @@ def _sqlite_manifest_content_fingerprint_details(
     year_fingerprints: dict[str, str] = {}
     row_count = 0
     for shard in sorted(
-        list(manifest.get("shards") or []),
+        list(manifest["shards"]),
         key=lambda item: str(item.get("year") or ""),
     ):
         year = str(shard.get("year") or "").strip()
@@ -1050,12 +1064,10 @@ def _search_sqlite_manifest_titles(
     progress_callback: ProgressCallback | None,
     cancel_check: CancelCheck | None,
 ) -> tuple[int, dict[str, int]]:
-    table_name = (
-        str(manifest.get("table_name") or "disclosures").strip() or "disclosures"
-    )
+    table_name = str(manifest["table_name"]).strip()
     where_sql, parameters = _sqlite_title_filter_expression(filter_blocks)
     shards = sorted(
-        list(manifest.get("shards") or []), key=lambda item: str(item.get("year") or "")
+        list(manifest["shards"]), key=lambda item: str(item.get("year") or "")
     )
     worker_count = _resolve_filter_workers(filter_workers, len(shards))
     clean_titles = any(

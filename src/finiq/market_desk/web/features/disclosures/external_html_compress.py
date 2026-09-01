@@ -64,6 +64,145 @@ def _validate_external_html_manifest_integrity(
         )
 
 
+def _inspect_external_html_compression_without_source(
+    compressed_path: Path,
+    *,
+    compressed_exists: bool,
+) -> dict[str, Any]:
+    if compressed_exists:
+        verification = _verify_compressed_external_html_files(
+            written_files=[str(compressed_path)],
+            expected_acpt_numbers=[],
+        )
+        return {
+            "format": "finiq_disclosure_external_html_compress_inspection_v1",
+            "compressed_path": str(compressed_path),
+            **verification,
+            "passed": False,
+            "skipped": False,
+            "orphaned_output": True,
+            "content_matches_source": False,
+            "error": "원본 HTML이 없지만 이전 압축 JSON이 남아 있습니다.",
+        }
+    return {
+        "format": "finiq_disclosure_external_html_compress_inspection_v1",
+        "compressed_path": str(compressed_path),
+        "passed": True,
+        "skipped": True,
+        "expected_records": 0,
+        "verified_records": 0,
+        "missing_records": 0,
+        "unexpected_records": 0,
+        "duplicate_records": 0,
+        "missing_files": [],
+        "invalid_files": [],
+        "content_matches_source": True,
+        "orphaned_output": False,
+        "error": "",
+    }
+
+
+def _external_html_compression_owner_state(
+    *,
+    input_directory: Path,
+    compressed_path: Path,
+) -> dict[str, Any]:
+    html_files = (
+        _collect_yearly_html_files(input_directory)
+        if input_directory.exists()
+        else []
+    )
+    expected_acpt_numbers = [html_path.stem for _year, html_path in html_files]
+    source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
+    invalid_source_acpt_numbers: list[str] = []
+    manifest_unverified_acpt_numbers: list[str] = []
+    manifest_mismatch_acpt_numbers: list[str] = []
+    manifest_error = ""
+    if html_files:
+        target_years = {
+            html_path.stem: year for year, html_path in html_files
+        }
+        source_summary = _validate_html_output_directory_files(
+            input_directory,
+            expected_acpt_numbers,
+            target_years=target_years,
+            allow_unexpected=True,
+            collect_integrity=True,
+        )
+        source_integrity_by_acpt_no = source_summary.pop(
+            "_target_integrity_by_acpt_no"
+        )
+        invalid_source_acpt_numbers = list(
+            source_summary["invalid_target_acpt_numbers"]
+        )
+        try:
+            (
+                manifest_format,
+                _source_fingerprint,
+                expected_integrity,
+                _selected_doc_numbers,
+            ) = _load_html_manifest_integrity(input_directory)
+            if not manifest_format:
+                manifest_error = (
+                    "external HTML manifest integrity baseline is missing: "
+                    f"{input_directory / HTML_MANIFEST_FILENAME}"
+                )
+            else:
+                manifest_unverified_acpt_numbers = [
+                    acpt_no
+                    for acpt_no in expected_acpt_numbers
+                    if acpt_no not in expected_integrity
+                ]
+                manifest_mismatch_acpt_numbers = [
+                    acpt_no
+                    for acpt_no, actual in source_integrity_by_acpt_no.items()
+                    if acpt_no in expected_integrity
+                    and actual != expected_integrity[acpt_no]
+                ]
+        except Exception as exc:
+            manifest_error = str(exc)
+
+    compressed_exists = compressed_path.is_file()
+    verification = _verify_compressed_external_html_files(
+        written_files=[str(compressed_path)],
+        expected_acpt_numbers=expected_acpt_numbers,
+    )
+    compressed_payload: Any = None
+    compressed_records: list[Any] = []
+    compressed_format_valid = False
+    if compressed_exists:
+        try:
+            compressed_payload = json.loads(
+                compressed_path.read_text(encoding="utf-8")
+            )
+            compressed_records = (
+                compressed_payload.get("records")
+                if isinstance(compressed_payload, dict)
+                and isinstance(compressed_payload.get("records"), list)
+                else []
+            )
+            compressed_format_valid = (
+                isinstance(compressed_payload, dict)
+                and compressed_payload.get("format")
+                == "finiq_disclosure_external_html_docs_v1"
+                and isinstance(compressed_payload.get("records"), list)
+            )
+        except Exception:
+            pass
+    return {
+        "expected_acpt_numbers": expected_acpt_numbers,
+        "source_integrity_by_acpt_no": source_integrity_by_acpt_no,
+        "invalid_source_acpt_numbers": invalid_source_acpt_numbers,
+        "manifest_unverified_acpt_numbers": manifest_unverified_acpt_numbers,
+        "manifest_mismatch_acpt_numbers": manifest_mismatch_acpt_numbers,
+        "manifest_error": manifest_error,
+        "compressed_exists": compressed_exists,
+        "verification": verification,
+        "compressed_records": compressed_records,
+        "compressed_format_valid": compressed_format_valid,
+    }
+
+
 def _workspace_filter_presets(data_root: object) -> list[dict[str, Any]]:
     response = manage_filter_presets_payload(
         {"data_root": data_root, "action": "list"}
@@ -80,6 +219,7 @@ def inspect_all_disclosure_external_html_compress_payload(
         raise ValueError("data_root is required")
 
     results: list[dict[str, Any]] = []
+    owner_states: dict[tuple[str, str], dict[str, Any]] = {}
     for preset in _workspace_filter_presets(data_root):
         mode = preset["mode"]
         parent_mode = preset.get("parent_mode")
@@ -95,7 +235,26 @@ def inspect_all_disclosure_external_html_compress_payload(
             create_workspace=False,
         )
         try:
-            inspected = inspect_disclosure_external_html_compress_payload(payload)
+            owner_key = (
+                str(payload["input_directory"]),
+                str(payload["output_directory"]),
+            )
+            owner_state = owner_states.get(owner_key)
+            if owner_state is None:
+                input_directory = Path(owner_key[0]).expanduser().resolve()
+                compressed_path = (
+                    Path(owner_key[1]).expanduser().resolve()
+                    / COMPRESSED_EXTERNAL_HTML_FILENAME
+                )
+                owner_state = _external_html_compression_owner_state(
+                    input_directory=input_directory,
+                    compressed_path=compressed_path,
+                )
+                owner_states[owner_key] = owner_state
+            inspected = inspect_disclosure_external_html_compress_payload(
+                payload,
+                _owner_state=owner_state,
+            )
         except Exception as exc:
             inspected = {
                 "passed": False,
@@ -217,7 +376,7 @@ def rebuild_invalid_disclosure_external_html_compress_payload(
     }
 
 
-def _validate_derived_compression_reuse(
+def _validate_derived_compression_owner_paths(
     body: dict[str, Any],
     *,
     input_directory: Path,
@@ -242,6 +401,29 @@ def _validate_derived_compression_reuse(
             "derived filter compression must reuse its parent-owned output directory: "
             f"{expected_output_directory}"
         )
+    return {
+        "mode": mode,
+        "parent_mode": parent_mode,
+        "input_directory": expected_input_directory,
+        "output_directory": expected_output_directory,
+    }
+
+
+def _validate_derived_compression_reuse(
+    body: dict[str, Any],
+    *,
+    input_directory: Path,
+    output_directory: Path,
+) -> dict[str, Any]:
+    owner = _validate_derived_compression_owner_paths(
+        body,
+        input_directory=input_directory,
+        output_directory=output_directory,
+    )
+    mode = owner["mode"]
+    parent_mode = owner["parent_mode"]
+    expected_input_directory = owner["input_directory"]
+    expected_output_directory = owner["output_directory"]
 
     source_json, _source_path = _load_workspace_filtered_payload(body)
     acpt_numbers = collect_acpt_numbers_from_json(source_json)
@@ -311,10 +493,139 @@ def _validate_derived_compression_reuse(
     }
 
 
+def _compression_source_integrity_problems(
+    owner_state: dict[str, Any],
+    acpt_numbers: list[str],
+) -> dict[str, list[str] | str]:
+    actual_integrity = owner_state["source_integrity_by_acpt_no"]
+    invalid = set(owner_state["invalid_source_acpt_numbers"])
+    unverified = set(owner_state["manifest_unverified_acpt_numbers"])
+    mismatched = set(owner_state["manifest_mismatch_acpt_numbers"])
+    return {
+        "missing_or_invalid": [
+            acpt_no
+            for acpt_no in acpt_numbers
+            if acpt_no in invalid or acpt_no not in actual_integrity
+        ],
+        "manifest_unverified": [
+            acpt_no for acpt_no in acpt_numbers if acpt_no in unverified
+        ],
+        "manifest_mismatch": [
+            acpt_no for acpt_no in acpt_numbers if acpt_no in mismatched
+        ],
+        "manifest_error": str(owner_state["manifest_error"] or ""),
+    }
+
+
+def _compression_record_source_mismatches(
+    owner_state: dict[str, Any],
+    acpt_numbers: list[str],
+) -> list[str]:
+    target_set = set(acpt_numbers)
+    actual_integrity = owner_state["source_integrity_by_acpt_no"]
+    return [
+        acpt_no
+        for record in owner_state["compressed_records"]
+        if isinstance(record, dict)
+        and (acpt_no := str(record.get("acpt_no") or "").strip()) in target_set
+        and acpt_no in actual_integrity
+        and (
+            record.get("source_sha256")
+            != actual_integrity[acpt_no]["source_sha256"]
+            or record.get("source_size_bytes")
+            != actual_integrity[acpt_no]["source_size_bytes"]
+        )
+    ]
+
+
+def _inspect_derived_compression_reuse(
+    body: dict[str, Any],
+    *,
+    input_directory: Path,
+    output_directory: Path,
+    owner_state: dict[str, Any],
+) -> dict[str, Any]:
+    owner = _validate_derived_compression_owner_paths(
+        body,
+        input_directory=input_directory,
+        output_directory=output_directory,
+    )
+    source_json, _source_path = _load_workspace_filtered_payload(body)
+    acpt_numbers = collect_acpt_numbers_from_json(source_json)
+    compressed_path = output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+    if not owner_state["compressed_exists"]:
+        raise ValueError(
+            "parent compressed external HTML does not exist: "
+            f"{compressed_path}"
+        )
+    if not owner_state["compressed_format_valid"]:
+        raise ValueError(
+            "parent compressed external HTML has an invalid format: "
+            f"{compressed_path}"
+        )
+
+    target_records: dict[str, dict[str, Any]] = {}
+    target_set = set(acpt_numbers)
+    for record in owner_state["compressed_records"]:
+        if not isinstance(record, dict):
+            continue
+        acpt_no = str(record.get("acpt_no") or "").strip()
+        if acpt_no not in target_set:
+            continue
+        if acpt_no in target_records:
+            raise ValueError(
+                "parent compressed external HTML has duplicate derived target: "
+                f"{acpt_no}"
+            )
+        target_records[acpt_no] = record
+    missing = [acpt_no for acpt_no in acpt_numbers if acpt_no not in target_records]
+    if missing:
+        raise ValueError(
+            "parent compressed external HTML is missing derived targets: "
+            + ", ".join(missing[:10])
+        )
+
+    source_problems = _compression_source_integrity_problems(
+        owner_state,
+        acpt_numbers,
+    )
+    record_mismatches = _compression_record_source_mismatches(
+        owner_state,
+        acpt_numbers,
+    )
+    if (
+        source_problems["missing_or_invalid"]
+        or source_problems["manifest_unverified"]
+        or source_problems["manifest_mismatch"]
+        or source_problems["manifest_error"]
+        or record_mismatches
+    ):
+        raise ValueError(
+            "parent compressed external HTML source integrity check failed: "
+            f"missing_or_invalid={source_problems['missing_or_invalid'][:10]}, "
+            f"unverified={source_problems['manifest_unverified'][:10]}, "
+            f"manifest_mismatch={source_problems['manifest_mismatch'][:10]}, "
+            f"record_mismatch={record_mismatches[:10]}, "
+            f"manifest_error={source_problems['manifest_error']}"
+        )
+    return {
+        "mode": owner["mode"],
+        "parent_mode": owner["parent_mode"],
+        "acpt_numbers": acpt_numbers,
+        "compressed_path": compressed_path,
+    }
+
+
 def inspect_disclosure_external_html_compress_payload(
     body: dict[str, Any],
+    *,
+    _owner_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Verify the saved compressed JSON against the source HTML files."""
+    """Verify record membership and source integrity without rebuilding records.
+
+    Existing-data inspection deliberately does not parse source HTML into compact
+    records. Record extraction belongs to compression creation and its tests.
+    """
     body = apply_workspace_defaults(
         "external_html_compress", body, create_workspace=False
     )
@@ -328,30 +639,56 @@ def inspect_disclosure_external_html_compress_payload(
     input_directory = Path(input_directory_raw).expanduser().resolve()
     output_directory = Path(output_directory_raw).expanduser().resolve()
     compressed_path = output_directory / COMPRESSED_EXTERNAL_HTML_FILENAME
+
+    def derived_failure(exc: Exception) -> dict[str, Any]:
+        return {
+            "format": "finiq_disclosure_external_html_compress_inspection_v1",
+            "compressed_path": str(compressed_path),
+            "passed": False,
+            "skipped": False,
+            "expected_records": 0,
+            "verified_records": 0,
+            "missing_records": 0,
+            "unexpected_records": 0,
+            "duplicate_records": 0,
+            "missing_files": [],
+            "invalid_files": [],
+            "content_matches_source": False,
+            "orphaned_output": False,
+            "error": str(exc),
+        }
+
     if body.get("parent_mode") not in (None, ""):
         try:
-            derived = _validate_derived_compression_reuse(
+            _validate_derived_compression_owner_paths(
                 body,
                 input_directory=input_directory,
                 output_directory=output_directory,
             )
         except Exception as exc:
-            return {
-                "format": "finiq_disclosure_external_html_compress_inspection_v1",
-                "compressed_path": str(compressed_path),
-                "passed": False,
-                "skipped": False,
-                "expected_records": 0,
-                "verified_records": 0,
-                "missing_records": 0,
-                "unexpected_records": 0,
-                "duplicate_records": 0,
-                "missing_files": [],
-                "invalid_files": [],
-                "content_matches_source": False,
-                "orphaned_output": False,
-                "error": str(exc),
-            }
+            return derived_failure(exc)
+
+    owner_state = _owner_state or _external_html_compression_owner_state(
+        input_directory=input_directory,
+        compressed_path=compressed_path,
+    )
+    expected_acpt_numbers = list(owner_state["expected_acpt_numbers"])
+    if not expected_acpt_numbers:
+        return _inspect_external_html_compression_without_source(
+            compressed_path,
+            compressed_exists=bool(owner_state["compressed_exists"]),
+        )
+
+    if body.get("parent_mode") not in (None, ""):
+        try:
+            derived = _inspect_derived_compression_reuse(
+                body,
+                input_directory=input_directory,
+                output_directory=output_directory,
+                owner_state=owner_state,
+            )
+        except Exception as exc:
+            return derived_failure(exc)
         expected_records = len(derived["acpt_numbers"])
         return {
             "format": "finiq_disclosure_external_html_compress_inspection_v1",
@@ -369,52 +706,7 @@ def inspect_disclosure_external_html_compress_payload(
             "orphaned_output": False,
             "error": "",
         }
-    expected_acpt_numbers = (
-        [
-            html_path.stem
-            for _year, html_path in _collect_yearly_html_files(input_directory)
-        ]
-        if input_directory.exists()
-        else []
-    )
-
-    if not expected_acpt_numbers:
-        if compressed_path.exists():
-            verification = _verify_compressed_external_html_files(
-                written_files=[str(compressed_path)],
-                expected_acpt_numbers=[],
-            )
-            return {
-                "format": "finiq_disclosure_external_html_compress_inspection_v1",
-                "compressed_path": str(compressed_path),
-                **verification,
-                "passed": False,
-                "skipped": False,
-                "orphaned_output": True,
-                "content_matches_source": False,
-                "error": "원본 HTML이 없지만 이전 압축 JSON이 남아 있습니다.",
-            }
-        return {
-            "format": "finiq_disclosure_external_html_compress_inspection_v1",
-            "compressed_path": str(compressed_path),
-            "passed": True,
-            "skipped": True,
-            "expected_records": 0,
-            "verified_records": 0,
-            "missing_records": 0,
-            "unexpected_records": 0,
-            "duplicate_records": 0,
-            "missing_files": [],
-            "invalid_files": [],
-            "content_matches_source": True,
-            "orphaned_output": False,
-            "error": "",
-        }
-
-    verification = _verify_compressed_external_html_files(
-        written_files=[str(compressed_path)],
-        expected_acpt_numbers=expected_acpt_numbers,
-    )
+    verification = dict(owner_state["verification"])
     result = {
         "format": "finiq_disclosure_external_html_compress_inspection_v1",
         "compressed_path": str(compressed_path),
@@ -426,51 +718,44 @@ def inspect_disclosure_external_html_compress_payload(
     }
     if not verification["passed"]:
         return result
-
-    try:
-        saved_payload = json.loads(compressed_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        return {**result, "passed": False, "error": str(exc)}
-    if (
-        not isinstance(saved_payload, dict)
-        or saved_payload.get("format")
-        != "finiq_disclosure_external_html_docs_v1"
-        or not isinstance(saved_payload.get("records"), list)
-    ):
+    if not owner_state["compressed_format_valid"]:
         return {
             **result,
             "passed": False,
             "error": "압축 JSON 형식이 올바르지 않습니다.",
         }
 
-    try:
-        with tempfile.TemporaryDirectory(prefix="finiq-compress-inspection-") as temporary:
-            rebuild_body = {
-                "input_directory": str(input_directory),
-                "output_directory": temporary,
-                "parallel_workers": body.get("parallel_workers"),
-            }
-            metadata_payload: Any = _REQUEST_METADATA
-            if body.get("data_root") not in (None, ""):
-                metadata_payload, _metadata_path = _load_workspace_filtered_payload(body)
-            compress_disclosure_external_html_payload(
-                rebuild_body,
-                _metadata_payload=metadata_payload,
-            )
-            rebuilt_payload = json.loads(
-                (Path(temporary) / COMPRESSED_EXTERNAL_HTML_FILENAME).read_text(
-                    encoding="utf-8"
-                )
-            )
-    except Exception as exc:
-        return {**result, "passed": False, "error": str(exc)}
-
-    content_matches_source = saved_payload == rebuilt_payload
+    source_problems = _compression_source_integrity_problems(
+        owner_state,
+        expected_acpt_numbers,
+    )
+    record_mismatches = _compression_record_source_mismatches(
+        owner_state,
+        expected_acpt_numbers,
+    )
+    content_matches_source = not (
+        source_problems["missing_or_invalid"]
+        or source_problems["manifest_unverified"]
+        or source_problems["manifest_mismatch"]
+        or source_problems["manifest_error"]
+        or record_mismatches
+    )
+    error = ""
+    if not content_matches_source:
+        error = (
+            "외부 HTML 저장 무결성 또는 압축 record의 원문 hash·size가 "
+            "일치하지 않습니다: "
+            f"missing_or_invalid={source_problems['missing_or_invalid'][:10]}, "
+            f"unverified={source_problems['manifest_unverified'][:10]}, "
+            f"manifest_mismatch={source_problems['manifest_mismatch'][:10]}, "
+            f"record_mismatch={record_mismatches[:10]}, "
+            f"manifest_error={source_problems['manifest_error']}"
+        )
     return {
         **result,
         "passed": content_matches_source,
         "content_matches_source": content_matches_source,
-        "error": "" if content_matches_source else "압축 JSON이 현재 원문에서 다시 계산한 결과와 다릅니다.",
+        "error": error,
     }
 
 

@@ -34,6 +34,7 @@ def _inspection_manifest() -> dict[str, object]:
     return {
         "format": table_export.MANIFEST_FORMAT,
         "schema_version": table_export.TABLE_SCHEMA_VERSION,
+        "generated_at": "2026-01-01T00:00:00+00:00",
         "source_type": "source_folder",
         "table_name": "disclosures",
         "content_fingerprint": "a" * 64,
@@ -51,13 +52,18 @@ def _inspection_manifest() -> dict[str, object]:
                 "period_end": "2026-12-31",
                 "source_page": 1,
                 "source_rows": 2,
+                "written_rows": 1,
+                "duplicate_rows": 1,
             }
         ],
         "shards": [
             {
                 "year": "2026",
+                "companies": 1,
                 "disclosures": 1,
                 "unlinked_disclosures": 1,
+                "indexes": [],
+                "fts_enabled": True,
             }
         ],
     }
@@ -186,6 +192,8 @@ def test_table_inspection_confirms_source_manifest_and_shards(
             "period_end": "2026-12-31",
             "source_page": 1,
             "source_rows": 2,
+            "written_rows": 1,
+            "duplicate_rows": 1,
         }
     ]
 

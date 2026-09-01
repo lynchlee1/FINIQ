@@ -109,6 +109,8 @@ const metadataInspectionKey = (payload: DownloadExistingPayload) => JSON.stringi
 });
 
 const existingPayloadFromDownloadPayload = (payload: DownloadPayload) => ({
+  data_root: payload.data_root,
+  separate_output_directory: payload.separate_output_directory,
   output_directory: payload.output_directory,
   start_date: payload.start_date,
   end_date: payload.end_date,
@@ -314,6 +316,22 @@ export default function DownloadPage() {
     setStatus(message);
     setIsErrorStatus(true);
   }, [setIsErrorStatus, setStatus]);
+  const handleStageStorageChanged = useCallback(() => {
+    metadataInspectionRequestIdRef.current += 1;
+    metadataInspectionAbortControllerRef.current?.abort();
+    fileInspectionStartAbortControllerRef.current?.abort();
+    metadataInspectionAbortControllerRef.current = null;
+    fileInspectionStartAbortControllerRef.current = null;
+    setMetadataInspectRunning(false);
+    setInspectRunning(false);
+    clearActiveInspection();
+    clearExistingInspection();
+    clearCleanupCandidates();
+    setLastInspectedMetadataKey(null);
+    setLastInspectedFilesKey(null);
+    setPreviewResult(null);
+    setResult(null);
+  }, [clearActiveInspection, clearCleanupCandidates, clearExistingInspection]);
   const existingData = existingInspectionResult?.has_existing
     ? existingInspectionResult
     : null;
@@ -1358,7 +1376,8 @@ export default function DownloadPage() {
                 <DisclosureStageStorageSettings
                   dataRoot={dataRoot}
                   stages={["01-list"]}
-                  disabled={!!activeJobId || runStarting}
+                  disabled={!!activeJobId || runStarting || metadataInspectRunning || inspectRunning}
+                  onChanged={handleStageStorageChanged}
                   onError={handlePathError}
                 />
                 <div className="space-y-3">

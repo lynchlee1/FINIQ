@@ -7,6 +7,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.market_desk.filter_workflow_fixtures import (
+    publish_completed_filter_result,
+)
+
 from finiq.market_desk.web.app import app
 from finiq.market_desk.web.features.disclosures import external_html_compress
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
@@ -30,22 +34,14 @@ from finiq.market_desk.web.features.disclosures.filter_presets import (
 
 
 def _publish_filtered_result(path: Path, payload: dict[str, object]) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    workflow_path = path.with_name("filter.json")
-    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-    workflow.pop("result", None)
-    workflow.pop("pending", None)
-    workflow.update(
-        {
-            "status": "completed",
-            "result_file": path.name,
-            "result_fingerprint": _source_json_fingerprint(payload),
-        }
-    )
-    workflow["steps"]["database_query"]["status"] = "completed"
-    workflow["steps"]["record"]["status"] = "completed"
-    workflow_path.write_text(
-        json.dumps(workflow, ensure_ascii=False), encoding="utf-8"
+    is_derived = path.parent.parent.name == "subfilters"
+    parent_mode = path.parents[2].name if is_derived else None
+    data_root = path.parents[4] if is_derived else path.parents[2]
+    publish_completed_filter_result(
+        data_root,
+        mode=path.parent.name,
+        parent_mode=parent_mode,
+        payload=payload,
     )
 
 
@@ -114,6 +110,47 @@ def _compression_payload(
     return payload
 
 
+def _publish_derived_filter(
+    payload: dict[str, object],
+    *,
+    mode: str = "bond_issuance_kosdaq",
+) -> None:
+    data_root = Path(str(payload["data_root"]))
+    parent_mode = str(payload["mode"])
+    parent_filtered_path = (
+        data_root / "03-filter" / parent_mode / "filtered.json"
+    )
+    parent_filtered = json.loads(
+        parent_filtered_path.read_text(encoding="utf-8")
+    )
+    manage_filter_presets_payload(
+        {
+            "data_root": str(data_root),
+            "action": "save",
+            "preset": {
+                "mode": mode,
+                "parent_mode": parent_mode,
+                "condition_blocks": [],
+            },
+        }
+    )
+    child_path = (
+        parent_filtered_path.parent
+        / "subfilters"
+        / mode
+        / "filtered.json"
+    )
+    _publish_filtered_result(
+        child_path,
+        {
+            "format": "kind_disclosure_filter_v1",
+            "parent_mode": parent_mode,
+            "parent_result_fingerprint": _source_json_fingerprint(parent_filtered),
+            "disclosures": list(parent_filtered["disclosures"]),
+        },
+    )
+
+
 def test_external_html_compression_uses_and_creates_standard_output_directory(
     tmp_path: Path,
 ) -> None:
@@ -176,8 +213,8 @@ def test_workspace_compression_uses_current_complete_filter_metadata(
 
     inspected = inspect_disclosure_external_html_compress_payload(payload)
 
-    assert inspected["passed"] is False
-    assert inspected["content_matches_source"] is False
+    assert inspected["passed"] is True
+    assert inspected["content_matches_source"] is True
 
 
 def test_external_html_compression_uses_requested_progress_interval(
@@ -207,9 +244,14 @@ def test_workspace_compression_rejects_uncompleted_filter_workflow(
     )
     workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
     workflow["status"] = "ready"
+    workflow["steps"]["database_query"] = {"status": "pending"}
+    workflow["steps"]["record"] = {"status": "pending"}
+    workflow.pop("result_file", None)
+    workflow.pop("result_fingerprint", None)
+    workflow.pop("result_summary", None)
     workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="filter workflow is not completed"):
+    with pytest.raises(ValueError, match="Filter workflow is not completed"):
         compress_disclosure_external_html_payload(payload)
 
 
@@ -227,7 +269,7 @@ def test_workspace_compression_rejects_changed_filtered_result(
     filtered["disclosures"][0]["title"] = "봉인 뒤에 바뀐 제목"
     filtered_path.write_text(json.dumps(filtered, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="result fingerprint does not match"):
+    with pytest.raises(ValueError, match="result fingerprint is invalid"):
         compress_disclosure_external_html_payload(payload)
 
 
@@ -278,9 +320,19 @@ def test_external_html_compression_does_not_fall_back_to_input_directory(
     assert not (input_directory / "compressed-external-html.json").exists()
 
 
-def test_inspect_external_html_compression_checks_saved_json_content(tmp_path: Path) -> None:
+def test_inspect_external_html_compression_checks_source_integrity_without_recompressing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payload = _compression_payload(tmp_path)
     compress_disclosure_external_html_payload(payload)
+    monkeypatch.setattr(
+        external_html_compress,
+        "compress_disclosure_external_html_payload",
+        lambda *_args, **_kwargs: pytest.fail(
+            "compression inspection must not rebuild compressed output"
+        ),
+    )
 
     inspected = inspect_disclosure_external_html_compress_payload(payload)
 
@@ -290,14 +342,36 @@ def test_inspect_external_html_compression_checks_saved_json_content(tmp_path: P
 
     compressed_path = Path(str(inspected["compressed_path"]))
     compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
-    compressed["records"][0]["title"] = "변조된 제목"
+    compressed["records"][0]["source_sha256"] = "0" * 64
     compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
 
     changed = inspect_disclosure_external_html_compress_payload(payload)
 
     assert changed["passed"] is False
     assert changed["content_matches_source"] is False
-    assert "다릅니다" in changed["error"]
+    assert "record_mismatch" in changed["error"]
+
+
+def test_inspect_external_html_compression_does_not_recompute_record_content(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    compress_disclosure_external_html_payload(payload)
+    compressed_path = (
+        Path(str(payload["output_directory"]))
+        / "compressed-external-html.json"
+    )
+    compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
+    compressed["records"][0]["title"] = "검사 범위 밖의 변경"
+    compressed_path.write_text(
+        json.dumps(compressed, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    inspected = inspect_disclosure_external_html_compress_payload(payload)
+
+    assert inspected["passed"] is True
+    assert inspected["content_matches_source"] is True
 
 
 def test_inspect_external_html_compression_reports_missing_json(tmp_path: Path) -> None:
@@ -349,6 +423,88 @@ def test_inspect_external_html_compression_rejects_orphaned_output(
     assert all_modes["repairable_failed_modes"] == []
 
 
+def test_owner_and_derived_inspections_skip_when_owner_has_no_source_or_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    _publish_derived_filter(payload)
+    input_directory = Path(str(payload["input_directory"]))
+    (input_directory / "2025" / "20250101000001.html").unlink()
+    owner_scans = 0
+    real_collect = external_html_compress._collect_yearly_html_files
+
+    def tracked_collect(directory: Path):
+        nonlocal owner_scans
+        owner_scans += 1
+        return real_collect(directory)
+
+    monkeypatch.setattr(
+        external_html_compress,
+        "_collect_yearly_html_files",
+        tracked_collect,
+    )
+
+    inspected = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+
+    assert inspected["passed"] is True
+    assert inspected["failed_modes"] == []
+    assert inspected["skipped_modes"] == [
+        "bond_issuance",
+        "bond_issuance/bond_issuance_kosdaq",
+    ]
+    assert all(result["passed"] for result in inspected["results"])
+    assert all(result["skipped"] for result in inspected["results"])
+    assert owner_scans == 1
+
+
+def test_owner_and_derived_inspections_reject_the_same_orphaned_output(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    _publish_derived_filter(payload)
+    compress_disclosure_external_html_payload(payload)
+    input_directory = Path(str(payload["input_directory"]))
+    (input_directory / "2025" / "20250101000001.html").unlink()
+
+    inspected = inspect_all_disclosure_external_html_compress_payload(
+        {"data_root": payload["data_root"], "parallel_workers": 1}
+    )
+
+    assert inspected["passed"] is False
+    assert inspected["failed_modes"] == [
+        "bond_issuance",
+        "bond_issuance/bond_issuance_kosdaq",
+    ]
+    assert inspected["skipped_modes"] == []
+    assert inspected["repairable_failed_modes"] == []
+    assert all(result["orphaned_output"] for result in inspected["results"])
+
+
+def test_derived_inspection_rejects_empty_non_owner_directories(
+    tmp_path: Path,
+) -> None:
+    payload = _compression_payload(tmp_path)
+    child_mode = "bond_issuance_kosdaq"
+    _publish_derived_filter(payload, mode=child_mode)
+
+    inspected = inspect_disclosure_external_html_compress_payload(
+        {
+            "data_root": payload["data_root"],
+            "mode": child_mode,
+            "parent_mode": payload["mode"],
+            "input_directory": str(tmp_path / "empty-input"),
+            "output_directory": str(tmp_path / "empty-output"),
+        }
+    )
+
+    assert inspected["passed"] is False
+    assert inspected["skipped"] is False
+    assert "must reuse its parent-owned input directory" in inspected["error"]
+
+
 def test_compression_rejects_source_html_changed_after_manifest(
     tmp_path: Path,
 ) -> None:
@@ -381,7 +537,7 @@ def test_compression_rejects_source_html_changed_after_manifest(
 
     inspected = inspect_disclosure_external_html_compress_payload(payload)
     assert inspected["passed"] is False
-    assert "manifest integrity" in inspected["error"]
+    assert "manifest_mismatch" in inspected["error"]
     assert compressed_path.read_bytes() == saved_before
 
 
@@ -487,7 +643,7 @@ def test_inspect_and_rebuild_invalid_external_html_compression_modes(tmp_path: P
     valid_compressed_inode = valid_compressed_path.stat().st_ino
     compressed_path = Path(str(payload["output_directory"])) / "compressed-external-html.json"
     compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
-    compressed["records"][0]["title"] = "변조된 제목"
+    compressed["records"][0]["source_sha256"] = "0" * 64
     compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
 
     inspected = inspect_all_disclosure_external_html_compress_payload(
@@ -520,7 +676,7 @@ def test_rebuild_only_modes_with_source_html_when_modes_are_mixed(tmp_path: Path
     compress_disclosure_external_html_payload(payload)
     compressed_path = Path(str(payload["output_directory"])) / "compressed-external-html.json"
     compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
-    compressed["records"][0]["title"] = "변조된 제목"
+    compressed["records"][0]["source_sha256"] = "0" * 64
     compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
     empty_input_directory = Path(str(empty_payload["input_directory"]))
     (empty_input_directory / "2025" / "20250101000001.html").unlink()
@@ -605,7 +761,7 @@ def test_repair_route_regenerates_invalid_compression_without_database(
     valid_compressed_inode = valid_compressed_path.stat().st_ino
     compressed_path = Path(str(payload["output_directory"])) / "compressed-external-html.json"
     compressed = json.loads(compressed_path.read_text(encoding="utf-8"))
-    compressed["records"][0]["title"] = "변조된 제목"
+    compressed["records"][0]["source_sha256"] = "0" * 64
     compressed_path.write_text(json.dumps(compressed, ensure_ascii=False), encoding="utf-8")
 
     client = TestClient(app)
@@ -708,6 +864,21 @@ def test_derived_mode_inspects_the_same_owner_html_and_compressed_file(
             },
         ],
     )
+    source_scan_count = 0
+    real_validate_source = (
+        external_html_compress._validate_html_output_directory_files
+    )
+
+    def tracked_validate_source(*args, **kwargs):
+        nonlocal source_scan_count
+        source_scan_count += 1
+        return real_validate_source(*args, **kwargs)
+
+    monkeypatch.setattr(
+        external_html_compress,
+        "_validate_html_output_directory_files",
+        tracked_validate_source,
+    )
 
     inspected = inspect_all_disclosure_external_html_compress_payload(
         {"data_root": payload["data_root"], "parallel_workers": 1}
@@ -719,6 +890,7 @@ def test_derived_mode_inspects_the_same_owner_html_and_compressed_file(
     assert inspected["verified_records"] == 3
     assert inspected["repairable_failed_mode_count"] == 0
     assert all(result["passed"] for result in inspected["results"])
+    assert source_scan_count == 1
 
     compressed_path = (
         Path(str(payload["output_directory"])) / "compressed-external-html.json"

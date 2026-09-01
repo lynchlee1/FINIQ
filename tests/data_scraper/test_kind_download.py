@@ -177,7 +177,7 @@ def test_kind_workflow_does_not_complete_checkpoint_when_input_publish_fails(
     )
 
     with pytest.raises(OSError, match="input publish failed"):
-        workflow.save_search_results(session=FakeSession())
+        workflow.save_search_results(session=FakeSession(total_items_multiplier=1))
 
     checkpoint = json.loads(
         (tmp_path / "kind_workflow.checkpoint.json").read_text(encoding="utf-8")
@@ -948,7 +948,7 @@ def test_kind_workflow_can_save_results_from_stored_inputs(tmp_path: Path) -> No
         start_date="2024-01-01",
         end_date="2024-12-31",
         start_page=1,
-        end_page=2,
+        end_page=3,
         disclosure_type_groups={"01": ["0119"]},
         last_report_only=True,
         wait_seconds_between_requests=0,
@@ -959,17 +959,154 @@ def test_kind_workflow_can_save_results_from_stored_inputs(tmp_path: Path) -> No
     assert (tmp_path / "000_mainGET.body").read_bytes() == b"main-body"
     assert (tmp_path / "001_post_page_00001.body").exists()
     assert (tmp_path / "002_post_page_00002.body").exists()
-    assert len(result["saved_files"]) == 3
+    assert (tmp_path / "003_post_page_00003.body").exists()
+    assert len(result["saved_files"]) == 4
     assert get_form_value(result["request_data"], "lastReport") == "T"
     assert Path(result["input_snapshot_path"]).exists()
     assert Path(result["checkpoint_path"]).exists()
 
     checkpoint_payload = json.loads(Path(result["checkpoint_path"]).read_text(encoding="utf-8"))
     assert checkpoint_payload["completed"] is True
-    assert checkpoint_payload["last_saved_page"] == 2
-    assert checkpoint_payload["saved_files"][-1].endswith("002_post_page_00002.body")
+    assert checkpoint_payload["last_saved_page"] == 3
+    assert checkpoint_payload["saved_files"][-1].endswith("003_post_page_00003.body")
     assert "output_directory" not in checkpoint_payload["input"]
     assert all(not Path(path).is_absolute() for path in checkpoint_payload["saved_files"])
+
+
+def test_kind_workflow_does_not_complete_or_publish_partial_page_range(
+    tmp_path: Path,
+) -> None:
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=2,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="페이지 무결성 검사 실패",
+    ):
+        workflow.save_search_results(session=FakeSession())
+
+    assert not (tmp_path / "kind_workflow.input.json").exists()
+    checkpoint = json.loads(
+        (tmp_path / "kind_workflow.checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["completed"] is False
+    assert checkpoint["last_saved_page"] == 2
+
+
+def test_kind_workflow_rejects_nonfirst_start_page_before_writing(
+    tmp_path: Path,
+) -> None:
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=2,
+        end_page=3,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    with pytest.raises(ValueError, match="starting at page 1"):
+        workflow.save_search_results(session=FakeSession())
+
+    assert not list(tmp_path.glob("*.body"))
+    assert not (tmp_path / "kind_workflow.input.json").exists()
+    assert not (tmp_path / "kind_workflow.checkpoint.json").exists()
+
+
+def test_kind_workflow_rejects_partial_overwrite_of_completed_download(
+    tmp_path: Path,
+) -> None:
+    completed = KindWorkflow()
+    completed.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=3,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+    completed.save_search_results(session=FakeSession())
+
+    partial = KindWorkflow()
+    partial.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=2,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+    session = FakeSession()
+
+    with pytest.raises(ValueError, match="existing full pagination"):
+        partial.save_search_results(session=session)
+
+    assert session.post_calls == []
+    checkpoint = json.loads(
+        (tmp_path / "kind_workflow.checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["completed"] is True
+    assert checkpoint["last_saved_page"] == 3
+
+
+def test_kind_workflow_does_not_publish_when_first_page_changes_during_download(
+    tmp_path: Path,
+) -> None:
+    class ChangingFirstPageSession(FakeSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self.page_one_calls = 0
+
+        def post(self, *args, **kwargs) -> FakeResponse:
+            response = super().post(*args, **kwargs)
+            page_number = int(get_form_value(kwargs["data"], "pageIndex"))
+            if page_number == 1:
+                self.page_one_calls += 1
+                if self.page_one_calls == 2:
+                    response.content = response.content.replace(
+                        "테스트 공시 1".encode(),
+                        "변경된 공시 1".encode(),
+                        1,
+                    )
+                    response.text = response.content.decode("utf-8")
+            return response
+
+    workflow = KindWorkflow()
+    workflow.configure(
+        output_directory=tmp_path,
+        request_headers=REQUEST_HEADERS,
+        start_date="2024-01-01",
+        end_date="2024-12-31",
+        start_page=1,
+        end_page=3,
+        wait_seconds_between_requests=0,
+        timeout=5,
+    )
+
+    with pytest.raises(ValueError, match="다운로드 중 변경되었습니다"):
+        workflow.save_search_results(session=ChangingFirstPageSession())
+
+    assert not (tmp_path / "kind_workflow.input.json").exists()
+    checkpoint = json.loads(
+        (tmp_path / "kind_workflow.checkpoint.json").read_text(encoding="utf-8")
+    )
+    assert checkpoint["completed"] is False
 
 
 def test_kind_workflow_parallel_checkpoint_contains_every_saved_file(
@@ -1081,7 +1218,7 @@ def test_run_download_saves_and_returns_summary(tmp_path: Path) -> None:
         start_date="2024-01-01",
         end_date="2024-12-31",
         start_page=1,
-        end_page=1,
+        end_page=3,
         search_filters={"searchCorpName": "삼성전자"},
         wait_seconds_between_requests=0,
         timeout=5,
@@ -1108,7 +1245,7 @@ def test_kind_workflow_writes_input_snapshot_and_checkpoint_incrementally(
         start_date="2024-01-01",
         end_date="2024-12-31",
         start_page=1,
-        end_page=2,
+        end_page=3,
         wait_seconds_between_requests=0,
         timeout=5,
     )
@@ -1144,9 +1281,9 @@ def test_kind_workflow_writes_input_snapshot_and_checkpoint_incrementally(
 
     checkpoint_payload = json.loads(Path(result["checkpoint_path"]).read_text(encoding="utf-8"))
     assert "request_headers" not in checkpoint_payload["input"]
-    assert observed_checkpoint_pages == [None, 1, 2]
+    assert observed_checkpoint_pages == [None, 1, 2, 3]
     assert checkpoint_payload["completed"] is True
-    assert checkpoint_payload["last_saved_page"] == 2
+    assert checkpoint_payload["last_saved_page"] == 3
 
 
 def test_kind_workflow_stops_when_existing_folder_has_different_locked_page_size(

@@ -43,6 +43,9 @@ test("derived disclosure filters keep parent and child identities separate", asy
   assert.doesNotMatch(page, /FILTER_MODE_KEYS/);
   assert.doesNotMatch(page, /html_parse_mode/);
   assert.doesNotMatch(page, /bond_issuance/);
+  assert.match(page, /titleSearchDataRootRef\.current !== currentDataRootRef\.current/);
+  assert.match(page, /setResult\(null\);[\s\S]*?setTitleResult\(null\);[\s\S]*?setPresets\(\[\]\);/);
+  assert.match(page, /id: "workspace",[\s\S]*?disabled: isJobActive/);
 
   assert.match(client, /if \(!options\.force && cached\?\.promise\) return cached\.promise/);
   assert.match(client, /preset: Pick<DisclosureConditionPreset, "mode" \| "condition_blocks"> & \{ parent_mode\?: string \}/);

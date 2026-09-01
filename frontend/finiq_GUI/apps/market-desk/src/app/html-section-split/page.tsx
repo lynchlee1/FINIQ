@@ -784,6 +784,18 @@ export default function HtmlSectionSplitPage() {
           settingsFields={splitOptionFields}
           pathFields={folderPathFields}
           onPathError={handlePathError}
+          onStageStorageChanged={() => {
+            const settings = useSettingsStore.getState();
+            setInputDirectory(settings.internal_html_output_directory || "");
+            setOutputDirectory(settings.html_section_split_output_directory || "");
+            setInspectResult(null);
+            setIntegrityInspectionResult(null);
+            setIntegrityInspectionError("");
+            setSectionPatterns(null);
+            setSelectedDocument(null);
+            setSelectedSourceUrl("");
+            setSplitResult(null);
+          }}
           onCancel={cancelInspectFolder}
         />
       </div>

@@ -1340,6 +1340,14 @@ export default function HtmlParsePage() {
                   dataRoot={dataRoot}
                   stages={["07-converted"]}
                   disabled={isJobActive}
+                  onChanged={() => {
+                    const settings = useSettingsStore.getState();
+                    setInputDirectory(settings.html_section_split_output_directory || "");
+                    setOutputDirectory(settings.html_parse_output_directory || "");
+                    clearInspection();
+                    setPreviewData(null);
+                    setLatestParseResult(null);
+                  }}
                   onError={handlePathError}
                 />
                 <div className="space-y-3">

@@ -14,6 +14,8 @@ from finiq.market_desk.web.features.disclosures.html_common import *
 
 def _load_internal_html_integrity_source(
     body: dict[str, Any],
+    *,
+    validate_owner_filter: bool = True,
 ) -> tuple[Any, str, list[str], dict[str, str]]:
     if "source_directory" in body:
         raise ValueError(
@@ -28,29 +30,13 @@ def _load_internal_html_integrity_source(
     source_json = internal_html_download._load_compressed_external_html_file_payload(
         source_path
     )
-    if body.get("parent_mode") not in (None, ""):
-        filtered_json, _filtered_path = _load_workspace_filtered_payload(body)
-        child_acpt_numbers = collect_acpt_numbers_from_json(filtered_json)
-        records_by_acpt_no = {
-            acpt_no: record
-            for record, acpt_no in internal_html_download._validated_compressed_records(
-                source_json
+    if validate_owner_filter or body.get("parent_mode") not in (None, ""):
+        source_json, _workspace_acpt_numbers = (
+            internal_html_download._load_current_workspace_internal_source(
+                body,
+                source_json,
             )
-        }
-        missing = [
-            acpt_no
-            for acpt_no in child_acpt_numbers
-            if acpt_no not in records_by_acpt_no
-        ]
-        if missing:
-            raise ValueError(
-                "parent compressed external records are missing derived targets: "
-                + ", ".join(missing[:10])
-            )
-        source_json = {
-            **source_json,
-            "records": [records_by_acpt_no[acpt_no] for acpt_no in child_acpt_numbers],
-        }
+        )
     targets, source_json = (
         internal_html_download._collect_internal_targets_from_compressed_payload(
             source_json
@@ -201,7 +187,49 @@ def _check_disclosure_html_output_directory_payload(
         "_target_integrity_by_acpt_no"
     )
     output_directory = Path(summary["output_directory"])
-    loaded_manifest_integrity = _load_html_manifest_integrity(output_directory)
+    try:
+        loaded_manifest_integrity = _load_html_manifest_integrity(output_directory)
+        recorded_source_unavailable = _load_html_manifest_source_unavailable(
+            output_directory
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        existing_acpt_numbers = list(summary["existing_target_acpt_numbers"])
+        summary.update(
+            {
+                "manifest_invalid": True,
+                "manifest_error": str(exc),
+                "hash_manifest_source_matches": False,
+                "hash_verified_target_html_count": 0,
+                "hash_verified_target_acpt_numbers": [],
+                "hash_unverified_target_html_count": len(existing_acpt_numbers),
+                "hash_unverified_target_acpt_numbers": existing_acpt_numbers,
+                "hash_mismatch_target_html_count": 0,
+                "hash_mismatch_target_acpt_numbers": [],
+                "source_unavailable_target_html_count": 0,
+                "source_unavailable_target_acpt_numbers": [],
+                "download_required_target_html_count": len(acpt_numbers),
+                "download_required_target_acpt_numbers": list(acpt_numbers),
+            }
+        )
+        existing_count = int(summary.get("existing_target_html_count") or 0)
+        total_file_count = int(summary.get("total_file_count") or 0)
+        result = {
+            **summary,
+            "format": "kind_disclosure_html_existing_check_v1",
+            "has_existing": existing_count > 0 or total_file_count > 0,
+        }
+        if return_scan_context:
+            result["_scan_context"] = {
+                "owner_acpt_numbers": acpt_numbers,
+                "structurally_valid_acpt_numbers": existing_acpt_numbers,
+                "invalid_target_acpt_numbers": summary[
+                    "invalid_target_acpt_numbers"
+                ],
+                "source_unavailable_target_acpt_numbers": [],
+                "actual_integrity_by_acpt_no": actual_integrity_by_acpt_no,
+                "loaded_manifest_integrity": ("", "", {}, {}),
+            }
+        return result
     selected_doc_numbers = _selected_main_doc_numbers(source_json)
     unsupported_placeholders = (
         _unsupported_source_unavailable_acpt_numbers(
@@ -211,9 +239,6 @@ def _check_disclosure_html_output_directory_payload(
         )
         if selected_doc_numbers
         else []
-    )
-    recorded_source_unavailable = _load_html_manifest_source_unavailable(
-        output_directory
     )
     placeholders = {
         acpt_no: placeholder
@@ -445,16 +470,23 @@ def _inspect_all_disclosure_html_payload(
             create_workspace=False,
         )
         try:
-            empty_completed_filter = False
-            filtered_path = ""
-            if preset.get("status") == "completed":
-                filtered_json, filtered_path = _load_workspace_filtered_payload(
-                    payload
-                )
-                empty_completed_filter = not collect_acpt_numbers_from_json(
-                    filtered_json
-                )
+            filtered_json, filtered_path = _load_workspace_filtered_payload(payload)
+            empty_completed_filter = not collect_acpt_numbers_from_json(
+                filtered_json
+            )
             if empty_completed_filter:
+                empty_output_summary: dict[str, Any] = {}
+                if not parent_mode:
+                    empty_output_summary = _validate_html_output_directory_files(
+                        Path(payload["output_directory"]).expanduser().resolve(),
+                        [],
+                        target_years={},
+                        allow_unexpected=True,
+                        problem_file_limit=body.get("problem_file_limit"),
+                    )
+                stale_output_count = int(
+                    empty_output_summary.get("total_file_count") or 0
+                )
                 inspected = {
                     "format": "kind_disclosure_html_existing_check_v1",
                     "source_type": (
@@ -472,8 +504,15 @@ def _inspect_all_disclosure_html_payload(
                     "hash_mismatch_target_html_count": 0,
                     "hash_unverified_target_html_count": 0,
                     "source_unavailable_target_html_count": 0,
-                    "deletion_candidate_count": 0,
-                    "has_existing": False,
+                    "unexpected_file_count": int(
+                        empty_output_summary.get("unexpected_file_count") or 0
+                    ),
+                    "unexpected_files": list(
+                        empty_output_summary.get("unexpected_files") or []
+                    ),
+                    "deletion_candidate_count": stale_output_count,
+                    "stale_output_file_count": stale_output_count,
+                    "has_existing": stale_output_count > 0,
                     "empty_filter_result": True,
                 }
             elif parent_mode:
@@ -690,7 +729,7 @@ def create_internal_html_integrity_baseline_payload(
     _ensure_safe_html_cleanup_directory(resolved_output_directory)
 
     source_json, _source_path, acpt_numbers, target_years = (
-        _load_internal_html_integrity_source(body)
+        _load_internal_html_integrity_source(body, validate_owner_filter=False)
     )
     if body.get("parent_mode") not in (None, ""):
         saved_paths, _verification = _strictly_reuse_parent_html(
@@ -840,41 +879,35 @@ def write_disclosure_html_manifest_payload(body: dict[str, Any]) -> dict[str, An
         source_compressed_json_path = (
             Path(source_compressed_json_path_raw).expanduser().resolve()
         )
-        source_json = internal_html_download._load_compressed_external_html_file_payload(
-            source_compressed_json_path
-        )
-        targets, source_json = (
-            internal_html_download._collect_internal_targets_from_compressed_payload(
-                source_json
-            )
-        )
-        acpt_numbers = [target["acpt_no"] for target in targets]
         resolved_source_path = str(source_compressed_json_path)
     else:
-        source_json, resolved_source_path = _load_workspace_filtered_payload(body)
-        acpt_numbers = collect_acpt_numbers_from_json(source_json)
-        if not acpt_numbers:
-            msg = "No acpt_no values found in JSON"
-            raise ValueError(msg)
+        workspace = resolve_disclosure_workspace(body.get("data_root") or "")
+        mode = validate_workspace_mode(body.get("mode"))
+        parent_mode_raw = body.get("parent_mode")
+        parent_mode = (
+            validate_workspace_mode(parent_mode_raw)
+            if parent_mode_raw not in (None, "")
+            else None
+        )
+        resolved_source_path = str(
+            workspace.filter_mode(mode, parent_mode=parent_mode) / "filtered.json"
+        )
 
-    manifest_path = _write_html_manifest(
-        output_directory=resolved_output_directory,
-        acpt_numbers=acpt_numbers,
-        source_json=source_json,
-        **(
-            {
-                "selected_main_doc_numbers": _selected_main_doc_numbers(
-                    source_json
-                )
-            }
-            if source_compressed_json_path_raw
-            else {}
-        ),
+    baseline_body = {
+        **body,
+        "output_directory": str(resolved_output_directory),
+    }
+    baseline = (
+        create_internal_html_integrity_baseline_payload(baseline_body)
+        if source_compressed_json_path_raw
+        else create_external_html_integrity_baseline_payload(baseline_body)
     )
+    manifest_path = Path(str(baseline["manifest_path"]))
     return {
         "format": "finiq_disclosure_html_manifest_write_v1",
         "output_directory": str(resolved_output_directory),
         "source_path": resolved_source_path,
-        "requested_count": len(acpt_numbers),
+        "requested_count": int(baseline["requested_count"]),
+        "hashed_count": int(baseline["hashed_count"]),
         "manifest_path": str(manifest_path),
     }

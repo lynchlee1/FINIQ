@@ -1302,10 +1302,26 @@ def inspect_disclosure_table_payload(body: dict[str, Any]) -> dict[str, Any]:
             "unlinked_disclosures": unlinked_disclosure_count,
             "shards": len(shard_counts),
         }
-        actual_summary = manifest.get("summary")
+        actual_summary = {
+            key: manifest["summary"].get(key) for key in expected_summary
+        }
         if actual_summary != expected_summary:
             raise ValueError("다운로드한 원본 데이터의 건수와 변환 기록의 요약이 다릅니다.")
-        if manifest.get("pages") != pages:
+        page_fields = (
+            "period_start",
+            "period_end",
+            "source_rows",
+            "written_rows",
+            "duplicate_rows",
+        )
+        actual_pages = [
+            {key: page.get(key) for key in page_fields}
+            for page in manifest["pages"]
+        ]
+        expected_pages = [
+            {key: page.get(key) for key in page_fields} for page in pages
+        ]
+        if actual_pages != expected_pages:
             raise ValueError("다운로드한 원본 데이터와 변환 기록에 적힌 페이지별 건수가 다릅니다.")
 
         expected_shards = [

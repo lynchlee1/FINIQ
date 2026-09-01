@@ -124,6 +124,7 @@ type HtmlSectionSplitActionDockProps = {
   settingsFields: HtmlWorkflowField[];
   pathFields: DataPathField[];
   onPathError: (message: string) => void;
+  onStageStorageChanged: () => void;
   onCancel: () => void;
 };
 
@@ -528,6 +529,7 @@ export function HtmlSectionSplitActionDock({
   settingsFields,
   pathFields,
   onPathError,
+  onStageStorageChanged,
   onCancel,
 }: HtmlSectionSplitActionDockProps) {
   let notificationContent: ReactNode;
@@ -570,6 +572,7 @@ export function HtmlSectionSplitActionDock({
             dataRoot={dataRoot}
             stages={["06-sections"]}
             disabled={isJobActive || isInspecting}
+            onChanged={onStageStorageChanged}
             onError={onPathError}
           />
           <div className="space-y-3">

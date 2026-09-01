@@ -15,6 +15,9 @@ from finiq.data.ontology_builder import (
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     resolve_disclosure_workspace,
 )
+from finiq.market_desk.web.features.disclosures.filter_presets import (
+    load_completed_filter_workflow_payload,
+)
 
 GRAPH_FORMAT = "finiq_disclosure_graph_v1"
 GRAPH_OUTPUT_DIRECTORY = "09-disclosure-graph"
@@ -63,6 +66,11 @@ def _source_paths(data_root: Path) -> tuple[dict[str, Path | None], list[str]]:
             missing_path = filtered_path if parsed_exists else parsed_path
             raise ValueError(
                 f"{mode} 입력이 완전하지 않습니다. 누락 파일: {missing_path}"
+            )
+        if filtered_exists:
+            load_completed_filter_workflow_payload(
+                data_root=data_root,
+                mode=mode,
             )
         resolved[f"{mode}_parsed"] = parsed_path if parsed_exists else None
         resolved[f"{mode}_filtered"] = filtered_path if filtered_exists else None

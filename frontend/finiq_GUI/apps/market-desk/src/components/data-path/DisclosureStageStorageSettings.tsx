@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@finiq/ui";
 import { apiPost } from "@/api/client";
 import { PathPickerInput } from "@/components/ui/PathPickerInput";
+import { useSettingsStore } from "@/store/useSettingsStore";
 
 export const DISCLOSURE_STORAGE_STAGES = [
   { name: "01-list", label: "01 공시내역 다운로드" },
@@ -56,6 +57,7 @@ export function DisclosureStageStorageSettings({
   const [targetWorkspace, setTargetWorkspace] = useState("");
   const [busyStage, setBusyStage] = useState<DisclosureStorageStage | null>(null);
   const [message, setMessage] = useState("");
+  const fetchSettings = useSettingsStore((state) => state.fetchSettings);
 
   useEffect(() => {
     const root = dataRoot.trim();
@@ -108,6 +110,7 @@ export function DisclosureStageStorageSettings({
         target_workspace: targetWorkspace.trim(),
       });
       setResult(next);
+      await fetchSettings(true);
       setEditingStage(null);
       setTargetWorkspace("");
       setMessage("단계별 저장 위치를 저장했습니다.");
@@ -131,6 +134,7 @@ export function DisclosureStageStorageSettings({
         stage,
       });
       setResult(next);
+      await fetchSettings(true);
       setEditingStage(null);
       setTargetWorkspace("");
       setMessage("단계 연결을 해제했습니다. 저장된 데이터는 삭제되지 않았습니다.");

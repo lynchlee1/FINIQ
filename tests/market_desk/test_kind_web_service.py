@@ -13,6 +13,10 @@ import zipfile
 import pandas as pd
 import pytest
 
+from tests.market_desk.filter_workflow_fixtures import (
+    publish_completed_filter_result,
+)
+
 import finiq.market_desk.web.features.disclosures.table_export as table_export_module
 import finiq.market_desk.web.features.disclosures.html_common as html_common_module
 from finiq.market_desk.web.features.disclosures import (
@@ -343,41 +347,10 @@ def _external_workspace_body(
     tmp_path: Path, source_json: dict[str, Any], **body: object
 ) -> dict[str, object]:
     data_root = tmp_path / "workspace"
-    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
-    filtered_path.parent.mkdir(parents=True, exist_ok=True)
-    normalized_source_json = dict(source_json)
-    if isinstance(source_json.get("disclosures"), list):
-        normalized_source_json["disclosures"] = [
-            {
-                **disclosure,
-                "disclosed_at": disclosure.get("disclosed_at")
-                or f"{str(disclosure.get('acpt_no') or '')[:4]}-01-01",
-            }
-            for disclosure in source_json["disclosures"]
-            if isinstance(disclosure, dict)
-        ]
-    filtered = {
-        "format": "kind_disclosure_filter_v1",
-        **normalized_source_json,
-    }
-    filtered_path.write_text(
-        json.dumps(filtered, ensure_ascii=False), encoding="utf-8"
-    )
-    filtered_path.with_name("filter.json").write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_filter_workflow",
-                "mode": "bond_issuance",
-                "parent_mode": None,
-                "status": "completed",
-                "result_file": filtered_path.name,
-                "result_fingerprint": html_common_module._source_json_fingerprint(
-                    filtered
-                ),
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    publish_completed_filter_result(
+        data_root,
+        mode="bond_issuance",
+        payload=source_json,
     )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
@@ -424,6 +397,20 @@ def _build_download_result_page_html(
 
 def _valid_download_html() -> str:
     return "<html><body>" + ("valid " * 30) + "</body></html>"
+
+
+def _valid_external_viewer_html(acpt_no: str) -> str:
+    return f"""
+    <html><body>
+      <input type="hidden" name="acptNo" value="{acpt_no}" />
+      <select id="mainDoc">
+        <option value="{acpt_no}999|Y" selected="selected">본문</option>
+      </select>
+      <select id="attachedDoc">
+        <option value="{acpt_no}888">첨부</option>
+      </select>
+    </body></html>
+    """
 
 
 def _selected_main_doc_fields(doc_no: str) -> dict[str, object]:
@@ -677,6 +664,7 @@ def _write_filter_manifest_fixture(
     manifest = {
         "format": "finiq_disclosure_table_manifest_v1",
         "schema_version": 4,
+        "generated_at": "2026-01-01T00:00:00+00:00",
         "source_type": "source_folder",
         "table_name": "disclosures",
         "summary": {
@@ -1380,21 +1368,29 @@ def test_filter_disclosures_payload_rejects_sqlite_manifest_without_row_no_colum
             {
                 "format": "finiq_disclosure_table_manifest_v1",
                 "schema_version": 4,
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "source_type": "sqlite_manifest",
                 "table_name": "disclosures",
                 "summary": {
                     "companies": 1,
+                    "source_rows": 1,
+                    "duplicate_rows": 0,
                     "disclosures": 1,
                     "unlinked_disclosures": 0,
                     "shards": 1,
                 },
+                "pages": [],
                 "shards": [
                     {
                         "year": "2025",
                         "companies": 1,
                         "disclosures": 1,
                         "unlinked_disclosures": 0,
+                        "indexes": [],
+                        "fts_enabled": False,
                     },
                 ],
+                "content_fingerprint": "a" * 64,
             },
             ensure_ascii=False,
         ),
@@ -1506,17 +1502,32 @@ def test_sqlite_manifest_count_validation_runs_shards_in_parallel(
     _validate_sqlite_manifest_counts(
         manifest_path,
         {
+            "format": "finiq_disclosure_table_manifest_v1",
             "schema_version": 4,
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "source_type": "sqlite_manifest",
             "table_name": "disclosures",
-            "summary": {"disclosures": 2, "unlinked_disclosures": 0},
+            "summary": {
+                "companies": 1,
+                "source_rows": 2,
+                "duplicate_rows": 0,
+                "disclosures": 2,
+                "unlinked_disclosures": 0,
+                "shards": 2,
+            },
+            "pages": [],
             "shards": [
                 {
                     "year": shard_name[:4],
+                    "companies": 1,
                     "disclosures": 1,
                     "unlinked_disclosures": 0,
+                    "indexes": [],
+                    "fts_enabled": False,
                 }
                 for shard_name in shard_names
             ],
+            "content_fingerprint": "a" * 64,
         },
         filter_workers=2,
     )
@@ -2243,6 +2254,38 @@ def test_table_inspection_rejects_same_count_source_content_change(
     ]
 
 
+def test_table_inspection_does_not_hash_source_page(
+    tmp_path: Path,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest_path = output_root / "sqlite_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["pages"][0]["source_page"] = 999
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    shard_path = output_root / f"{manifest['shards'][0]['year']}.sqlite"
+    with sqlite3.connect(shard_path) as connection:
+        connection.execute("UPDATE disclosures SET source_page = 999")
+        connection.commit()
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert inspection["confirmed"] is True
+
+
 def test_table_inspection_matches_content_across_year_shards(
     tmp_path: Path,
 ) -> None:
@@ -2336,7 +2379,7 @@ def test_table_inspection_rejects_schema4_path_storage(
     assert "경로" in inspection["reason"]
 
 
-def test_table_inspection_rejects_schema4_unexpected_manifest_field(
+def test_table_inspection_allows_schema4_non_path_extensions(
     tmp_path: Path,
 ) -> None:
     source_root = _write_source_body_fixture(tmp_path)
@@ -2349,7 +2392,48 @@ def test_table_inspection_rejects_schema4_unexpected_manifest_field(
     )
     manifest_path = output_root / "sqlite_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["unexpected_metadata"] = "not part of schema 4"
+    manifest["extension_metadata"] = "future manifest field"
+    manifest["summary"]["extension_count"] = 1
+    manifest["pages"][0]["extension_label"] = "future page field"
+    manifest["shards"][0]["extension_label"] = "future shard field"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+    )
+    shard_path = output_root / f"{manifest['shards'][0]['year']}.sqlite"
+    with sqlite3.connect(shard_path) as connection:
+        connection.execute("ALTER TABLE disclosures ADD COLUMN extension_value TEXT")
+        connection.execute(
+            "INSERT INTO table_metadata(key, value) VALUES "
+            "('extension_feature', 'enabled')"
+        )
+        connection.commit()
+
+    inspection = table_export_module.inspect_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+
+    assert inspection["confirmed"] is True
+
+
+@pytest.mark.parametrize("required_field", ["generated_at", "table_name"])
+def test_table_inspection_rejects_missing_schema4_required_manifest_field(
+    tmp_path: Path,
+    required_field: str,
+) -> None:
+    source_root = _write_source_body_fixture(tmp_path)
+    output_root = tmp_path / "02-table"
+    build_disclosure_table_payload(
+        {
+            "root_directory": str(source_root),
+            "output_path": str(output_root),
+        }
+    )
+    manifest_path = output_root / "sqlite_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop(required_field)
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
     )
@@ -2362,7 +2446,8 @@ def test_table_inspection_rejects_schema4_unexpected_manifest_field(
     )
 
     assert inspection["confirmed"] is False
-    assert "스키마 4의 필드가 저장 계약과 다릅니다" in inspection["reason"]
+    assert "필수 필드가 없습니다" in inspection["reason"]
+    assert required_field in inspection["reason"]
 
 
 def test_table_inspection_rejects_unbound_fts5_table(tmp_path: Path) -> None:
@@ -3469,12 +3554,21 @@ def test_write_disclosure_html_manifest_payload_from_workspace_filtered_json(
         ]
     }
     output_directory = tmp_path / "converted"
+    for disclosure in source_json["disclosures"]:
+        acpt_no = disclosure["acpt_no"]
+        html_path = output_directory / "2025" / f"{acpt_no}.html"
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(
+            _valid_external_viewer_html(acpt_no),
+            encoding="utf-8",
+        )
 
     payload = write_disclosure_html_manifest_payload(
         _external_workspace_body(
             tmp_path,
             source_json,
             output_directory=str(output_directory),
+            trust_existing_files=True,
         )
     )
 
@@ -3488,49 +3582,115 @@ def test_write_disclosure_html_manifest_payload_from_workspace_filtered_json(
         "20250101000002",
     ]
     assert manifest["disclosures"][0]["market"] == "코스닥"
+    assert payload["hashed_count"] == 2
+    assert all(record["source_size_bytes"] > 0 for record in manifest["disclosures"])
+    assert all(len(record["source_sha256"]) == 64 for record in manifest["disclosures"])
+
+    compressed = compress_disclosure_external_html_payload(
+        {
+            "input_directory": str(output_directory),
+            "output_directory": str(tmp_path / "compressed"),
+            "parallel_workers": 1,
+        }
+    )
+
+    assert compressed["verification"]["passed"] is True
+
+
+def test_write_disclosure_html_manifest_payload_hashes_internal_html(
+    tmp_path: Path,
+) -> None:
+    acpt_no = "20250101000001"
+    doc_no = "20250101000999"
+    compressed_path = tmp_path / "compressed-external-html.json"
+    compressed_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": acpt_no,
+                        **_selected_main_doc_fields(doc_no),
+                        "metadata": {"disclosed_at": "2025-01-01"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_directory = tmp_path / "content-html"
+    html_path = output_directory / "2025" / f"{acpt_no}.html"
+    html_path.parent.mkdir(parents=True)
+    html_path.write_text(_valid_download_html(), encoding="utf-8")
+
+    payload = write_disclosure_html_manifest_payload(
+        {
+            "output_directory": str(output_directory),
+            "source_compressed_json_path": str(compressed_path),
+            "trust_existing_files": True,
+        }
+    )
+
+    manifest = json.loads(Path(payload["manifest_path"]).read_text(encoding="utf-8"))
+    record = manifest["disclosures"][0]
+    assert payload["hashed_count"] == 1
+    assert manifest["format"] == "finiq_disclosure_html_manifest_v3"
+    assert record["selected_main_doc_no"] == doc_no
+    assert record["source_size_bytes"] == html_path.stat().st_size
+    assert len(record["source_sha256"]) == 64
+
+
+def test_write_disclosure_html_manifest_payload_requires_trust_confirmation(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="현재 외부 HTML 신뢰 확인이 필요합니다"):
+        write_disclosure_html_manifest_payload(
+            _external_workspace_body(
+                tmp_path,
+                {
+                    "disclosures": [
+                        {
+                            "acpt_no": "20250101000001",
+                            "disclosed_at": "2025-01-01",
+                        }
+                    ]
+                },
+                output_directory=str(tmp_path / "external"),
+            )
+        )
 
 
 def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder(
     tmp_path: Path,
 ) -> None:
     data_root = tmp_path / "workspace"
+    output_directory = tmp_path / "converted"
     for mode, acpt_no in (
         ("bond_issuance", "20250101000001"),
         ("rights_issuance", "20250101000002"),
     ):
-        filtered_path = data_root / "03-filter" / mode / "filtered.json"
-        filtered_path.parent.mkdir(parents=True)
-        filtered = {
-            "format": "kind_disclosure_filter_v1",
-            "disclosures": [
-                {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
-            ],
-        }
-        filtered_path.write_text(
-            json.dumps(filtered),
-            encoding="utf-8",
+        publish_completed_filter_result(
+            data_root,
+            mode=mode,
+            payload={
+                "disclosures": [
+                    {"acpt_no": acpt_no, "disclosed_at": "2025-01-01"}
+                ]
+            },
         )
-        filtered_path.with_name("filter.json").write_text(
-            json.dumps(
-                {
-                    "format": "finiq_disclosure_filter_workflow",
-                    "mode": mode,
-                    "parent_mode": None,
-                    "status": "completed",
-                    "result_file": filtered_path.name,
-                    "result_fingerprint": (
-                        html_common_module._source_json_fingerprint(filtered)
-                    ),
-                }
-            ),
-            encoding="utf-8",
-        )
+    html_path = output_directory / "2025" / "20250101000001.html"
+    html_path.parent.mkdir(parents=True)
+    html_path.write_text(
+        _valid_external_viewer_html("20250101000001"),
+        encoding="utf-8",
+    )
 
     payload = write_disclosure_html_manifest_payload(
         {
             "data_root": str(data_root),
             "mode": "bond_issuance",
-            "output_directory": str(tmp_path / "converted"),
+            "output_directory": str(output_directory),
+            "trust_existing_files": True,
         }
     )
 
@@ -3544,19 +3704,64 @@ def test_write_disclosure_html_manifest_payload_uses_selected_mode_filter_folder
     ]
 
 
+def test_write_disclosure_html_manifest_preserves_existing_manifest_on_failure(
+    tmp_path: Path,
+) -> None:
+    output_directory = tmp_path / "converted"
+    output_directory.mkdir()
+    manifest_path = output_directory / "kind_disclosure_html_manifest.json"
+    original = b'{"existing": true}'
+    manifest_path.write_bytes(original)
+
+    with pytest.raises(ValueError, match="정상 외부 HTML이 없습니다"):
+        write_disclosure_html_manifest_payload(
+            _external_workspace_body(
+                tmp_path,
+                {
+                    "disclosures": [
+                        {
+                            "acpt_no": "20250101000001",
+                            "disclosed_at": "2025-01-01",
+                        }
+                    ]
+                },
+                output_directory=str(output_directory),
+                trust_existing_files=True,
+            )
+        )
+
+    assert manifest_path.read_bytes() == original
+
+
 def test_write_disclosure_html_manifest_payload_rejects_noncanonical_receipt_list(
     tmp_path: Path,
 ) -> None:
     output_directory = tmp_path / "converted"
+    body = _external_workspace_body(
+        tmp_path,
+        {"disclosures": []},
+        output_directory=str(output_directory),
+        trust_existing_files=True,
+    )
+    filter_path = (
+        Path(str(body["data_root"]))
+        / "03-filter"
+        / "bond_issuance"
+        / "filtered.json"
+    )
+    filtered = json.loads(filter_path.read_text(encoding="utf-8"))
+    filtered.pop("disclosures")
+    filtered["acpt_no_list"] = ["20250101000001"]
+    filter_path.write_text(json.dumps(filtered), encoding="utf-8")
+    workflow_path = filter_path.with_name("filter.json")
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["result_fingerprint"] = html_common_module._source_json_fingerprint(
+        filtered
+    )
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="disclosures array"):
-        write_disclosure_html_manifest_payload(
-            _external_workspace_body(
-                tmp_path,
-                {"acpt_no_list": ["20250101000001"]},
-                output_directory=str(output_directory),
-            )
-        )
+    with pytest.raises(ValueError, match="disclosures must be a list"):
+        write_disclosure_html_manifest_payload(body)
 
     assert not (output_directory / "kind_disclosure_html_manifest.json").exists()
 
@@ -3629,7 +3834,10 @@ def test_download_disclosure_internal_html_payload_finishes_hashing_after_cancel
 ) -> None:
     def fake_download(**kwargs):
         target = kwargs["targets"][0]
-        path = Path(kwargs["output_directory"]) / f"{target['acpt_no']}.html"
+        path = (
+            Path(kwargs["target_output_directories"][target["acpt_no"]])
+            / f"{target['acpt_no']}.html"
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_valid_download_html(), encoding="utf-8")
         cancel_disclosure_html_download("cancel-during-hash")
@@ -4270,21 +4478,28 @@ def test_failed_placeholder_refresh_reports_membership_error(
             reason="content_path_missing",
         )
     )
-    write_disclosure_html_manifest_payload(
-        {
-            "output_directory": str(output_directory),
-            "source_compressed_json_path": str(compressed_path),
-        }
-    )
     manifest_path = output_directory / "kind_disclosure_html_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["disclosures"][0]["source_unavailable"] = {
-        "doc_no": doc_no,
-        "reason": "content_path_missing",
-    }
-    manifest["disclosures"][0]["source_sha256"] = "0" * 64
-    manifest["disclosures"][0]["source_size_bytes"] = placeholder_path.stat().st_size
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v3",
+                "disclosures": [
+                    {
+                        "acpt_no": acpt_no,
+                        "disclosed_at": "2025-01-01",
+                        "selected_main_doc_no": doc_no,
+                        "source_unavailable": {
+                            "doc_no": doc_no,
+                            "reason": "content_path_missing",
+                        },
+                        "source_sha256": "0" * 64,
+                        "source_size_bytes": placeholder_path.stat().st_size,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(
         "finiq.market_desk.web.features.disclosures.internal_html_download.download_disclosure_internal_htmls",
@@ -4553,46 +4768,11 @@ def test_all_external_html_inspection_reuses_parent_file_hashes_for_derived_filt
             encoding="utf-8"
         )
     )
-    child_path = (
-        data_root
-        / "03-filter"
-        / "bond_issuance"
-        / "subfilters"
-        / "bond_issuance_kosdaq"
-        / "filtered.json"
-    )
-    child_path.parent.mkdir(parents=True)
-    child_path.write_text(
-        json.dumps(
-            {
-                "format": "kind_disclosure_filter_v1",
-                "parent_mode": "bond_issuance",
-                "parent_result_fingerprint": html_common._source_json_fingerprint(
-                    parent_payload
-                ),
-                "disclosures": [parent_payload["disclosures"][0]],
-            }
-        ),
-        encoding="utf-8",
-    )
-    child_payload = json.loads(child_path.read_text(encoding="utf-8"))
-    child_path.with_name("filter.json").write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_filter_workflow",
-                "mode": "bond_issuance_kosdaq",
-                "parent_mode": "bond_issuance",
-                "parent_result_fingerprint": child_payload[
-                    "parent_result_fingerprint"
-                ],
-                "status": "completed",
-                "result_file": child_path.name,
-                "result_fingerprint": html_common._source_json_fingerprint(
-                    child_payload
-                ),
-            }
-        ),
-        encoding="utf-8",
+    child_path, _child_payload = publish_completed_filter_result(
+        data_root,
+        mode="bond_issuance_kosdaq",
+        parent_mode="bond_issuance",
+        payload={"disclosures": [parent_payload["disclosures"][0]]},
     )
 
     output_directory = data_root / "04-external-html-download" / "bond_issuance"
@@ -4681,46 +4861,11 @@ def test_all_internal_html_inspection_reuses_parent_file_hashes_for_derived_filt
             encoding="utf-8"
         )
     )
-    child_path = (
-        data_root
-        / "03-filter"
-        / "bond_issuance"
-        / "subfilters"
-        / "bond_issuance_kosdaq"
-        / "filtered.json"
-    )
-    child_path.parent.mkdir(parents=True)
-    child_path.write_text(
-        json.dumps(
-            {
-                "format": "kind_disclosure_filter_v1",
-                "parent_mode": "bond_issuance",
-                "parent_result_fingerprint": html_common._source_json_fingerprint(
-                    parent_payload
-                ),
-                "disclosures": [parent_payload["disclosures"][0]],
-            }
-        ),
-        encoding="utf-8",
-    )
-    child_payload = json.loads(child_path.read_text(encoding="utf-8"))
-    child_path.with_name("filter.json").write_text(
-        json.dumps(
-            {
-                "format": "finiq_disclosure_filter_workflow",
-                "mode": "bond_issuance_kosdaq",
-                "parent_mode": "bond_issuance",
-                "parent_result_fingerprint": child_payload[
-                    "parent_result_fingerprint"
-                ],
-                "status": "completed",
-                "result_file": child_path.name,
-                "result_fingerprint": html_common._source_json_fingerprint(
-                    child_payload
-                ),
-            }
-        ),
-        encoding="utf-8",
+    child_path, _child_payload = publish_completed_filter_result(
+        data_root,
+        mode="bond_issuance_kosdaq",
+        parent_mode="bond_issuance",
+        payload={"disclosures": [parent_payload["disclosures"][0]]},
     )
     compressed_path = (
         data_root
@@ -9123,6 +9268,55 @@ def test_parse_disclosure_html_payload_uses_filtered_metadata_market(tmp_path: P
 
     assert payload["records"][0]["상장구분"] == "코스닥"
     assert payload["records"][0]["corp_name"] == "테스트발행사"
+
+
+def test_parse_disclosure_html_rejects_failed_workspace_filter(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    viewer_dir = data_root / "06-sections" / "bond_issuance" / "2025"
+    viewer_dir.mkdir(parents=True)
+    _html_parse_file(viewer_dir, "20250101000001.html").write_text(
+        "<html></html>", encoding="utf-8"
+    )
+    filtered_path, _result = publish_completed_filter_result(
+        data_root,
+        mode="bond_issuance",
+        payload={
+            "disclosures": [
+                {
+                    "acpt_no": "20250101000001",
+                    "company_name": "테스트발행사",
+                    "market": "코스닥",
+                    "disclosed_at": "2025-01-01 09:00",
+                }
+            ]
+        },
+    )
+    workflow_path = filtered_path.with_name("filter.json")
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["status"] = "failed"
+    workflow["steps"]["record"] = {
+        "status": "failed",
+        "error": "publish failed",
+    }
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+    output_directory = data_root / "07-converted" / "bond_issuance"
+
+    with pytest.raises(ValueError, match="Filter workflow is not completed"):
+        parse_disclosure_html_payload(
+            {
+                "data_root": str(data_root),
+                "input_directory": str(viewer_dir.parent),
+                "output_directory": str(output_directory),
+                "filtered_metadata_path": str(filtered_path),
+                "mode": "bond_issuance",
+                "parser_method": "bond_issuance",
+                "skip_errors": False,
+            }
+        )
+
+    assert not (output_directory / "parsed-bond_issuance.json").exists()
 
 
 def test_parse_disclosure_html_payload_uses_explicit_metadata_path(
@@ -15237,6 +15431,59 @@ def test_check_existing_downloads_route_verify_with_kind_parsing(tmp_path: Path,
     # test default
     route_func({"output_directory": "/tmp"})
     assert called_verify_with_kind[-1] is True
+
+
+def test_detect_existing_downloads_route_resolves_linked_stage(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from finiq.market_desk.web.features.disclosure_workflow.layout import (
+        manage_disclosure_stage_links_payload,
+    )
+    from finiq.market_desk.web.routers.download import create_download_router
+
+    class DummyConfig:
+        download_output_directory = None
+        output_root = None
+
+    data_root = tmp_path / "workspace"
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    manage_disclosure_stage_links_payload(
+        {
+            "data_root": str(data_root),
+            "action": "set",
+            "stage": "01-list",
+            "target_workspace": str(target_root),
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_detect(path: str, *, current_payload=None):
+        captured["path"] = path
+        captured["payload"] = current_payload
+        return {"has_existing": True}
+
+    monkeypatch.setattr(
+        "finiq.market_desk.web.routers.download.detect_existing_downloads",
+        fake_detect,
+    )
+    route = next(
+        route.endpoint
+        for route in create_download_router(DummyConfig()).routes
+        if getattr(route, "path", None) == "/api/download/detect-existing"
+    )
+
+    result = route(
+        {
+            "data_root": str(data_root),
+            "separate_output_directory": True,
+            "output_directory": str(data_root / "01-list"),
+        }
+    )
+
+    assert result == {"has_existing": True}
+    assert captured["path"] == str(target_root / "01-list")
+    assert captured["payload"]["output_directory"] == str(target_root / "01-list")
 
 
 def test_check_existing_downloads_fast_row_count_mismatch(tmp_path: Path, monkeypatch) -> None:

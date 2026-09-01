@@ -145,6 +145,10 @@ export default function FilterPage() {
     completed: number;
     issues: string[];
   } | null>(null);
+  const [stageLinkRevision, setStageLinkRevision] = useState(0);
+  const currentDataRootRef = useRef(rootDirectory);
+  const titleSearchDataRootRef = useRef("");
+  currentDataRootRef.current = rootDirectory;
   const {
     status: filterStatus,
     setStatus: setFilterStatus,
@@ -167,8 +171,13 @@ export default function FilterPage() {
     pollingEndpoint: "/api/disclosures/titles/jobs/{jobId}",
     cancelEndpoint: "/api/disclosures/titles/search/cancel",
     onSuccess: (response: TitleSearchResult) => {
+      if (titleSearchDataRootRef.current !== currentDataRootRef.current) {
+        titleSearchDataRootRef.current = "";
+        return;
+      }
       setTitleResult(response);
       setTitlePageIndex(0);
+      titleSearchDataRootRef.current = "";
     },
   });
   const setStatus = useCallback((message: string) => {
@@ -196,8 +205,6 @@ export default function FilterPage() {
   const presetListRequestIdRef = useRef(0);
   const inspectionRequestIdRef = useRef(0);
   const inspectionAbortControllerRef = useRef<AbortController | null>(null);
-  const currentDataRootRef = useRef(rootDirectory);
-  currentDataRootRef.current = rootDirectory;
 
   useEffect(() => {
     if (titleJobId) {
@@ -223,6 +230,11 @@ export default function FilterPage() {
 
   useEffect(() => {
     const requestId = ++presetListRequestIdRef.current;
+    titleSearchDataRootRef.current = "";
+    setResult(null);
+    setPageIndex(0);
+    setTitleResult(null);
+    setTitlePageIndex(0);
     setPresets([]);
     setSelectedPreset("");
     if (!rootDirectory?.trim()) {
@@ -237,7 +249,7 @@ export default function FilterPage() {
       setStatus(error instanceof Error ? error.message : String(error));
       setIsErrorStatus(true);
     });
-  }, [rootDirectory, setIsErrorStatus, setStatus]);
+  }, [rootDirectory, setIsErrorStatus, setStatus, stageLinkRevision]);
 
   useEffect(() => {
     inspectionAbortControllerRef.current?.abort();
@@ -352,14 +364,19 @@ export default function FilterPage() {
     }
     setTitleResult(null);
     setTitlePageIndex(0);
+    const dataRoot = rootDirectory;
+    titleSearchDataRootRef.current = dataRoot;
     try {
       const response = await apiPost<{ job_id: string }>("/api/disclosures/titles/search/start", {
-        data_root: rootDirectory,
+        data_root: dataRoot,
         filter_blocks: normalizeDisclosureConditionBlocks(conditions),
         filter_workers: configuredWorkers,
       });
       startTitlePolling(response.job_id);
     } catch (error) {
+      if (titleSearchDataRootRef.current === dataRoot) {
+        titleSearchDataRootRef.current = "";
+      }
       setTitleStatus(error instanceof Error ? error.message : String(error));
       setIsTitleErrorStatus(true);
     }
@@ -367,6 +384,7 @@ export default function FilterPage() {
 
   const handleCancel = () => {
     if (titleJobId) {
+      titleSearchDataRootRef.current = "";
       void cancelTitleSearch();
       return;
     }
@@ -630,6 +648,7 @@ export default function FilterPage() {
       label: DATA_PATH_LABELS.workspace,
       value: rootDirectory || "",
       onChange: (val) => saveSetting("output_root", val),
+      disabled: isJobActive,
     },
     ...(taskMode === "filter" ? [{
       id: "output",
@@ -950,6 +969,18 @@ export default function FilterPage() {
                 dataRoot={rootDirectory}
                 stages={["03-filter"]}
                 disabled={isJobActive}
+                onChanged={() => {
+                  inspectionRequestIdRef.current += 1;
+                  inspectionAbortControllerRef.current?.abort();
+                  inspectionAbortControllerRef.current = null;
+                  setInspectionRunning(false);
+                  setResult(null);
+                  setTitleResult(null);
+                  setInspectionError("");
+                  setInspectionSummary(null);
+                  setSelectedPreset("");
+                  setStageLinkRevision((revision) => revision + 1);
+                }}
                 onError={handlePathError}
               />
               <div className="space-y-3">

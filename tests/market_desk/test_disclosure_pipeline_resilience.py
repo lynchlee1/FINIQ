@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 
 import pytest
+
+from tests.market_desk.filter_workflow_fixtures import (
+    publish_completed_filter_result,
+)
 import requests
 
 from finiq.market_desk.web.features.disclosures.html_common import (
@@ -59,28 +63,11 @@ def _publish_filter_result(
     payload: dict[str, object],
     parent_mode: str | None = None,
 ) -> Path:
-    mode_directory = (
-        data_root / "03-filter" / mode
-        if parent_mode is None
-        else data_root / "03-filter" / parent_mode / "subfilters" / mode
-    )
-    mode_directory.mkdir(parents=True, exist_ok=True)
-    filtered_path = mode_directory / "filtered.json"
-    filtered_path.write_text(json.dumps(payload), encoding="utf-8")
-    workflow = {
-        "format": "finiq_disclosure_filter_workflow",
-        "mode": mode,
-        "parent_mode": parent_mode,
-        "status": "completed",
-        "result_file": filtered_path.name,
-        "result_fingerprint": _source_json_fingerprint(payload),
-    }
-    if parent_mode is not None:
-        workflow["parent_result_fingerprint"] = payload[
-            "parent_result_fingerprint"
-        ]
-    (mode_directory / "filter.json").write_text(
-        json.dumps(workflow), encoding="utf-8"
+    filtered_path, _result = publish_completed_filter_result(
+        data_root,
+        mode=mode,
+        payload=payload,
+        parent_mode=parent_mode,
     )
     return filtered_path
 
@@ -124,6 +111,58 @@ def _internal_html_body(
     }
 
 
+def _workspace_internal_html_body(
+    data_root: Path,
+    *,
+    mode: str,
+    filtered_disclosures: list[dict[str, str]],
+    compressed_disclosures: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    _publish_filter_result(
+        data_root,
+        mode=mode,
+        payload={"disclosures": filtered_disclosures},
+    )
+    records = (
+        filtered_disclosures
+        if compressed_disclosures is None
+        else compressed_disclosures
+    )
+    source_path = (
+        data_root
+        / "04-external-html-compress"
+        / mode
+        / "compressed-external-html.json"
+    )
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(
+        json.dumps(
+            {
+                "format": "finiq_disclosure_external_html_docs_v1",
+                "records": [
+                    {
+                        "acpt_no": disclosure["acpt_no"],
+                        **_selected_main_doc(f'{disclosure["acpt_no"]}99'),
+                        "metadata": {
+                            "disclosed_at": disclosure["disclosed_at"]
+                        },
+                    }
+                    for disclosure in records
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "data_root": str(data_root),
+        "mode": mode,
+        "source_compressed_json_path": str(source_path),
+        "output_directory": str(
+            data_root / "05-internal-html-download" / mode
+        ),
+    }
+
+
 def _write_derived_filter(
     data_root: Path,
     *,
@@ -132,23 +171,16 @@ def _write_derived_filter(
     parent_disclosures: list[dict[str, str]],
     child_disclosures: list[dict[str, str]],
 ) -> None:
-    parent_payload = {
-        "format": "kind_disclosure_filter_v1",
-        "disclosures": parent_disclosures,
-    }
     _publish_filter_result(
         data_root,
         mode=parent_mode,
-        payload=parent_payload,
+        payload={"disclosures": parent_disclosures},
     )
     _publish_filter_result(
         data_root,
         mode=mode,
         parent_mode=parent_mode,
         payload={
-            "format": "kind_disclosure_filter_v1",
-            "parent_mode": parent_mode,
-            "parent_result_fingerprint": _source_json_fingerprint(parent_payload),
             "disclosures": child_disclosures,
         },
     )
@@ -827,14 +859,22 @@ def test_external_html_legacy_v1_manifest_still_verifies(tmp_path: Path) -> None
     target.parent.mkdir(parents=True)
     content = _valid_html().encode("utf-8")
     target.write_bytes(content)
-    source_json = {
-        "format": "kind_disclosure_filter_v1",
-        "disclosures": [{"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}],
-    }
     body = _external_workspace_body(
         tmp_path,
-        {"disclosures": source_json["disclosures"]},
+        {
+            "disclosures": [
+                {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+            ]
+        },
         output_directory=str(output_directory),
+    )
+    source_json = json.loads(
+        (
+            Path(str(body["data_root"]))
+            / "03-filter"
+            / "bond_issuance"
+            / "filtered.json"
+        ).read_text(encoding="utf-8")
     )
     (output_directory / "kind_disclosure_html_manifest.json").write_text(
         json.dumps(
@@ -1701,10 +1741,39 @@ def test_external_html_download_rejects_changed_filtered_result(
         fake_download,
     )
 
-    with pytest.raises(ValueError, match="result fingerprint does not match"):
+    with pytest.raises(ValueError, match="result fingerprint is invalid"):
         download_disclosure_external_html_payload(body)
 
     assert download_called is False
+
+
+def test_external_html_download_rejects_invalid_filter_workflow_contract(
+    tmp_path: Path,
+) -> None:
+    body = _external_workspace_body(
+        tmp_path,
+        {
+            "disclosures": [
+                {
+                    "acpt_no": "20250101000001",
+                    "disclosed_at": "2025-01-01",
+                }
+            ]
+        },
+        output_directory=str(tmp_path / "external"),
+    )
+    workflow_path = (
+        Path(str(body["data_root"]))
+        / "03-filter"
+        / "bond_issuance"
+        / "filter.json"
+    )
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow.pop("steps", None)
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"steps\.condition_input must be an object"):
+        download_disclosure_external_html_payload(body)
 
 
 def test_internal_html_payload_passes_configured_kind_proxies(
@@ -1906,6 +1975,275 @@ def test_all_internal_html_inspection_passes_empty_owner_and_derived_filters(
     assert result["failed_modes"] == []
     assert [item["passed"] for item in result["results"]] == [True, True]
     assert [item["empty_filter_result"] for item in result["results"]] == [True, True]
+
+
+@pytest.mark.parametrize(
+    "compressed_disclosures",
+    [
+        [{"acpt_no": "20240101000001", "disclosed_at": "2024-01-01"}],
+        [{"acpt_no": "20250101000001", "disclosed_at": "2024-01-01"}],
+    ],
+)
+def test_internal_html_workspace_rejects_stale_compressed_targets(
+    tmp_path: Path,
+    compressed_disclosures: list[dict[str, str]],
+) -> None:
+    body = _workspace_internal_html_body(
+        tmp_path / "workspace",
+        mode="bond_issuance",
+        filtered_disclosures=[
+            {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+        ],
+        compressed_disclosures=compressed_disclosures,
+    )
+
+    with pytest.raises(ValueError, match="current completed filter"):
+        download_disclosure_internal_html_payload(body)
+
+
+def test_all_internal_html_inspection_rejects_noncompleted_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from finiq.market_desk.web.features.disclosures import html_cleanup
+
+    data_root = tmp_path / "workspace"
+    _workspace_internal_html_body(
+        data_root,
+        mode="bond_issuance",
+        filtered_disclosures=[
+            {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+        ],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["status"] = "ready"
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {"id": "bond_issuance", "mode": "bond_issuance", "status": "ready"}
+            ]
+        },
+    )
+
+    result = html_cleanup.inspect_all_disclosure_internal_html_payload(
+        {"data_root": str(data_root)}
+    )
+
+    assert result["passed"] is False
+    assert "filter workflow" in result["results"][0]["error"]
+
+
+@pytest.mark.parametrize(
+    "manifest_payload",
+    [
+        "{broken",
+        json.dumps({"format": "unknown", "disclosures": []}),
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v3",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "2025010100000199",
+                    },
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "2025010100000199",
+                    },
+                ],
+            }
+        ),
+        json.dumps(
+            {
+                "format": "finiq_disclosure_html_manifest_v3",
+                "disclosures": [
+                    {
+                        "acpt_no": "20250101000001",
+                        "selected_main_doc_no": "2025010100000199",
+                        "source_size_bytes": -1,
+                        "source_sha256": "bad",
+                    }
+                ],
+            }
+        ),
+    ],
+)
+def test_all_internal_html_inspection_marks_invalid_manifest_for_full_repair(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    manifest_payload: str,
+) -> None:
+    from finiq.market_desk.web.features.disclosures import html_cleanup
+
+    data_root = tmp_path / "workspace"
+    body = _workspace_internal_html_body(
+        data_root,
+        mode="bond_issuance",
+        filtered_disclosures=[
+            {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+        ],
+    )
+    output_directory = Path(str(body["output_directory"]))
+    target = output_directory / "2025" / "20250101000001.html"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_valid_html(), encoding="utf-8")
+    (output_directory / "kind_disclosure_html_manifest.json").write_text(
+        manifest_payload,
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {
+                    "id": "bond_issuance",
+                    "mode": "bond_issuance",
+                    "status": "completed",
+                }
+            ]
+        },
+    )
+
+    result = html_cleanup.inspect_all_disclosure_internal_html_payload(
+        {"data_root": str(data_root)}
+    )
+    inspected = result["results"][0]
+
+    assert inspected["passed"] is False
+    assert inspected["manifest_invalid"] is True
+    assert inspected["download_required_target_html_count"] == 1
+
+
+def test_internal_html_redownload_replaces_invalid_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from finiq.market_desk.web.features.disclosures import html_cleanup
+    from finiq.market_desk.web.features.disclosures import internal_html_download
+
+    data_root = tmp_path / "workspace"
+    body = _workspace_internal_html_body(
+        data_root,
+        mode="bond_issuance",
+        filtered_disclosures=[
+            {"acpt_no": "20250101000001", "disclosed_at": "2025-01-01"}
+        ],
+    )
+    output_directory = Path(str(body["output_directory"]))
+    output_directory.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_directory / "kind_disclosure_html_manifest.json"
+    manifest_path.write_text("{broken", encoding="utf-8")
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {
+                    "id": "bond_issuance",
+                    "mode": "bond_issuance",
+                    "status": "completed",
+                }
+            ]
+        },
+    )
+
+    def download_htmls(**kwargs: object) -> list[Path]:
+        saved: list[Path] = []
+        directories = kwargs["target_output_directories"]
+        for target in kwargs["targets"]:
+            acpt_no = target["acpt_no"]
+            path = Path(directories[acpt_no]) / f"{acpt_no}.html"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_valid_html("repaired"), encoding="utf-8")
+            saved.append(path)
+        return saved
+
+    monkeypatch.setattr(
+        internal_html_download,
+        "download_disclosure_internal_htmls",
+        download_htmls,
+    )
+
+    result = internal_html_download.redownload_missing_disclosure_internal_html_payload(
+        {"data_root": str(data_root)}
+    )
+
+    assert result["passed"] is True
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["format"] == "finiq_disclosure_html_manifest_v3"
+
+
+@pytest.mark.parametrize(
+    "stale_relative_path",
+    ["2025/20240101000001.html", "2024/20250101000001.html"],
+)
+def test_internal_html_download_without_reuse_rejects_leftover_html(
+    tmp_path: Path,
+    stale_relative_path: str,
+) -> None:
+    body = _internal_html_body(
+        tmp_path,
+        ["20250101000001"],
+        skip_existing=False,
+    )
+    stale_path = Path(str(body["output_directory"])) / stale_relative_path
+    stale_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_path.write_text(_valid_html("stale"), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="대상 접수번호 HTML이 아닌 파일"):
+        download_disclosure_internal_html_payload(body)
+
+
+def test_empty_owner_filter_reports_stale_internal_html_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from finiq.market_desk.web.features.disclosures import html_cleanup
+
+    data_root = tmp_path / "workspace"
+    _write_derived_filter(
+        data_root,
+        parent_disclosures=[],
+        child_disclosures=[],
+    )
+    stale_path = (
+        data_root
+        / "05-internal-html-download"
+        / "parent"
+        / "2025"
+        / "20250101000001.html"
+    )
+    stale_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_path.write_text(_valid_html("stale"), encoding="utf-8")
+    monkeypatch.setattr(
+        html_cleanup,
+        "manage_filter_presets_payload",
+        lambda _payload: {
+            "presets": [
+                {"id": "parent", "mode": "parent", "status": "completed"},
+                {
+                    "id": "parent/child",
+                    "mode": "child",
+                    "parent_mode": "parent",
+                    "status": "completed",
+                },
+            ]
+        },
+    )
+
+    result = html_cleanup.inspect_all_disclosure_internal_html_payload(
+        {"data_root": str(data_root)}
+    )
+
+    assert result["passed"] is False
+    assert result["results"][0]["has_existing"] is True
+    assert result["results"][0]["deletion_candidate_count"] == 1
+    assert result["results"][1]["passed"] is True
 
 
 def test_external_html_compression_rejects_receipt_number_mismatching_filename(

@@ -47,7 +47,7 @@ interface SettingsState {
   
   // Actions
   updateSettings: (newSettings: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings">>) => void;
-  fetchSettings: () => Promise<any>;
+  fetchSettings: (force?: boolean) => Promise<any>;
   fetchRuntimeInfo: () => Promise<any>;
   saveSetting: (key: keyof Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">, value: any) => Promise<boolean>;
   saveSettings: (payload: Partial<Omit<SettingsState, "updateSettings" | "fetchSettings" | "fetchRuntimeInfo" | "saveSetting" | "saveSettings" | "parallel_worker_count" | "runtime_info_loaded">>) => Promise<boolean>;
@@ -95,7 +95,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   updateSettings: (newSettings) => set((state) => ({ ...state, ...newSettings })),
 
-  fetchSettings: async () => {
+  fetchSettings: async (force = false) => {
+    if (force) {
+      const refreshId = ++settingsWriteId;
+      const config = await apiGet<Record<string, any>>("/api/config");
+      if (refreshId === settingsWriteId) {
+        cachedSettings = config;
+      }
+      const refreshed = cachedSettings ?? config;
+      const workerCount = Number(refreshed.parallel_worker_count);
+      if (!Number.isInteger(workerCount) || workerCount < 1) {
+        throw new Error("parallel_worker_count must be a positive integer");
+      }
+      set((state) => ({ ...state, ...refreshed, runtime_info_loaded: true }));
+      return refreshed;
+    }
     let config = cachedSettings;
     if (!config) {
       const writeId = settingsWriteId;

@@ -21,6 +21,9 @@ from finiq.market_desk.web.features.downloads.kind_jobs import (
     start_download_job,
     start_inspect_folder_job,
 )
+from finiq.market_desk.web.features.disclosure_workflow.layout import (
+    apply_workspace_defaults,
+)
 
 
 def create_download_router(config: Any) -> APIRouter:
@@ -28,17 +31,19 @@ def create_download_router(config: Any) -> APIRouter:
 
     @router.post("/api/download/check-existing")
     def check_existing_downloads_route(payload: dict[str, Any]):
-        val = payload.get("verify_with_kind")
-        if val is None or val == "":
-            verify_with_kind = True
-        elif isinstance(val, bool):
-            verify_with_kind = val
-        elif isinstance(val, str):
-            verify_with_kind = val.strip().lower() not in {"false", "0", "no"}
-        else:
-            verify_with_kind = bool(val)
-
         try:
+            payload = apply_workspace_defaults(
+                "kind_download", payload, create_workspace=False
+            )
+            val = payload.get("verify_with_kind")
+            if val is None or val == "":
+                verify_with_kind = True
+            elif isinstance(val, bool):
+                verify_with_kind = val
+            elif isinstance(val, str):
+                verify_with_kind = val.strip().lower() not in {"false", "0", "no"}
+            else:
+                verify_with_kind = bool(val)
             with KIND_NETWORK_JOB_LOCK:
                 return check_existing_downloads(
                     str(payload.get("output_directory") or ""),
@@ -51,6 +56,9 @@ def create_download_router(config: Any) -> APIRouter:
     @router.post("/api/download/detect-existing")
     def detect_existing_downloads_route(payload: dict[str, Any]):
         try:
+            payload = apply_workspace_defaults(
+                "kind_download", payload, create_workspace=False
+            )
             return detect_existing_downloads(
                 str(payload.get("output_directory") or ""),
                 current_payload=payload,

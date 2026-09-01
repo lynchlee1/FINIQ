@@ -628,7 +628,7 @@ def apply_workspace_defaults(
             parent_mode=parent_mode,
             linked=_stage_is_linked(workspace, "06-sections"),
         )
-    elif normalized_kind == "parse":
+    elif normalized_kind in {"parse", "parse_read"}:
         mode = validate_workspace_mode(payload.get("mode"))
         _assign_sections_mode_directory(
             payload,
@@ -638,9 +638,12 @@ def apply_workspace_defaults(
             parent_mode=parent_mode,
             linked=_stage_is_linked(workspace, "06-sections"),
         )
+        output_key = (
+            "output_path" if normalized_kind == "parse_read" else "output_directory"
+        )
         _set_stage_path(
             payload,
-            "output_directory",
+            output_key,
             str(
                 workspace.converted_filter_mode(
                     mode,
@@ -649,6 +652,8 @@ def apply_workspace_defaults(
             ),
             linked=_stage_is_linked(workspace, "07-converted"),
         )
+        if normalized_kind == "parse_read":
+            return payload
         _set_stage_path(
             payload,
             "filtered_metadata_path",

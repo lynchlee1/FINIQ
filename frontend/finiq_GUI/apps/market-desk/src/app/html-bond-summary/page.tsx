@@ -38,6 +38,7 @@ export default function HtmlBondSummaryPage() {
 
   // Form State
   const {
+    output_root: dataRoot,
     html_section_split_output_directory: inputPath,
     html_parse_output_directory: outputPath,
     html_parse_mode: parseMode,
@@ -78,6 +79,7 @@ export default function HtmlBondSummaryPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          data_root: dataRoot,
           input_directory: inputPath,
           output_path: outputPath,
           mode: parseMode,

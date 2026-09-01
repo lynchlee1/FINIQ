@@ -116,6 +116,7 @@ def redownload_missing_disclosure_internal_html_payload(
                     else {}
                 ),
                 redownload_unverified_existing=True,
+                replace_invalid_manifest=bool(target.get("manifest_invalid")),
             )
             cancelled = bool(result.get("cancelled"))
             results.append({"mode": mode, "passed": not cancelled, **result})
@@ -297,6 +298,86 @@ def _collect_internal_targets_from_compressed_payload(
         msg = "No internal HTML targets found in compressed external HTML JSON"
         raise ValueError(msg)
     return targets, payload
+
+
+def _validate_compressed_records_match_completed_filter(
+    compressed_payload: dict[str, Any],
+    filtered_payload: dict[str, Any],
+) -> None:
+    compressed_metadata = _collect_disclosure_metadata_from_json(compressed_payload)
+    filtered_metadata = _collect_disclosure_metadata_from_json(filtered_payload)
+    compressed_acpt_numbers = set(compressed_metadata)
+    filtered_acpt_numbers = set(filtered_metadata)
+    missing = sorted(filtered_acpt_numbers - compressed_acpt_numbers)
+    unexpected = sorted(compressed_acpt_numbers - filtered_acpt_numbers)
+    if missing or unexpected:
+        raise ValueError(
+            "compressed external records do not match the current completed filter: "
+            f"missing={missing[:10]}, unexpected={unexpected[:10]}"
+        )
+    disclosed_at_mismatches = [
+        acpt_no
+        for acpt_no in sorted(filtered_acpt_numbers)
+        if str(compressed_metadata[acpt_no].get("disclosed_at") or "").strip()
+        != str(filtered_metadata[acpt_no].get("disclosed_at") or "").strip()
+    ]
+    if disclosed_at_mismatches:
+        raise ValueError(
+            "compressed external record dates do not match the current completed "
+            "filter: "
+            + ", ".join(disclosed_at_mismatches[:10])
+        )
+
+
+def _load_current_workspace_internal_source(
+    body: dict[str, Any],
+    compressed_payload: dict[str, Any],
+) -> tuple[dict[str, Any], list[str] | None]:
+    if not str(body.get("data_root") or "").strip() or not str(
+        body.get("mode") or ""
+    ).strip():
+        return compressed_payload, None
+
+    parent_mode_raw = body.get("parent_mode")
+    if parent_mode_raw in (None, ""):
+        filtered_payload, _filtered_path = _load_workspace_filtered_payload(body)
+        _validate_compressed_records_match_completed_filter(
+            compressed_payload,
+            filtered_payload,
+        )
+        return compressed_payload, collect_acpt_numbers_from_json(filtered_payload)
+
+    parent_mode = validate_workspace_mode(parent_mode_raw)
+    parent_filtered_payload, _parent_filtered_path = _load_workspace_filtered_payload(
+        {"data_root": body["data_root"], "mode": parent_mode}
+    )
+    _validate_compressed_records_match_completed_filter(
+        compressed_payload,
+        parent_filtered_payload,
+    )
+    child_filtered_payload, _child_filtered_path = _load_workspace_filtered_payload(
+        body
+    )
+    child_acpt_numbers = collect_acpt_numbers_from_json(child_filtered_payload)
+    records_by_acpt_no = {
+        acpt_no: record
+        for record, acpt_no in _validated_compressed_records(compressed_payload)
+    }
+    missing = [
+        acpt_no for acpt_no in child_acpt_numbers if acpt_no not in records_by_acpt_no
+    ]
+    if missing:
+        raise ValueError(
+            "parent compressed external records are missing derived targets: "
+            + ", ".join(missing[:10])
+        )
+    return (
+        {
+            **compressed_payload,
+            "records": [records_by_acpt_no[acpt_no] for acpt_no in child_acpt_numbers],
+        },
+        child_acpt_numbers,
+    )
 
 
 def _internal_html_virtual_computer_worker(
@@ -717,6 +798,7 @@ def download_disclosure_internal_html_payload(
     download_callback: Callable[[], None] | None = None,
     *,
     redownload_unverified_existing: bool = False,
+    replace_invalid_manifest: bool = False,
 ) -> dict[str, Any]:
     """Download selected KIND disclosure body HTML files for receipt numbers."""
     output_directory = str(body.get("output_directory") or "").strip()
@@ -754,6 +836,9 @@ def download_disclosure_internal_html_payload(
         raise ValueError(msg)
     source_path = Path(source_compressed_json_path_raw).expanduser().resolve()
     compressed_payload = _load_compressed_external_html_file_payload(source_path)
+    compressed_payload, workspace_acpt_numbers = (
+        _load_current_workspace_internal_source(body, compressed_payload)
+    )
     parent_mode_raw = body.get("parent_mode")
     if parent_mode_raw not in (None, ""):
         workspace = resolve_disclosure_workspace(body.get("data_root") or "")
@@ -769,24 +854,8 @@ def download_disclosure_internal_html_payload(
                 "external records: "
                 f"{expected_source_path}"
             )
-        source_json, _source_json_path = _load_workspace_filtered_payload(body)
-        child_acpt_numbers = collect_acpt_numbers_from_json(source_json)
-        parent_records = {
-            acpt_no: record
-            for record, acpt_no in _validated_compressed_records(compressed_payload)
-        }
-        missing_records = [
-            acpt_no for acpt_no in child_acpt_numbers if acpt_no not in parent_records
-        ]
-        if missing_records:
-            raise ValueError(
-                "parent compressed external records are missing derived targets: "
-                + ", ".join(missing_records[:10])
-            )
-        derived_compressed_payload = {
-            **compressed_payload,
-            "records": [parent_records[acpt_no] for acpt_no in child_acpt_numbers],
-        }
+        child_acpt_numbers = workspace_acpt_numbers or []
+        derived_compressed_payload = compressed_payload
         if child_acpt_numbers:
             _targets, _ = _collect_internal_targets_from_compressed_payload(
                 derived_compressed_payload
@@ -852,6 +921,7 @@ def download_disclosure_internal_html_payload(
         target["acpt_no"]: target["year"]
         for target in targets
     }
+    skip_existing = bool(body.get("skip_existing", True))
     progress_interval = _parse_progress_interval(body.get("progress_interval"))
     max_workers = resolve_worker_count(
         body.get("max_workers"),
@@ -896,7 +966,7 @@ def download_disclosure_internal_html_payload(
     emit(f"외부 HTML 경로: {source_path}")
     emit(f"저장 경로: {resolved_output_directory}")
     emit(
-        f"기존 파일 건너뛰기: {'예' if bool(body.get('skip_existing', True)) else '아니오'}"
+        f"기존 파일 건너뛰기: {'예' if skip_existing else '아니오'}"
     )
     emit(f"이어하기 방식: 저장된 HTML 파일 건너뛰기")
     emit(f"진행 확인 간격: {progress_interval}건")
@@ -904,9 +974,31 @@ def download_disclosure_internal_html_payload(
     existing_paths_by_acpt_no: dict[str, Path] = {}
     source_integrity_by_acpt_no: dict[str, dict[str, Any]] = {}
     target_by_acpt_no = {target["acpt_no"]: target for target in targets}
-    recorded_source_unavailable = _load_html_manifest_source_unavailable(
-        resolved_output_directory
+    existing_check_started_at = time.monotonic()
+    emit("기존 HTML 구조 및 저장 범위 검사를 시작합니다.")
+    output_summary = _validate_html_output_directory_files(
+        resolved_output_directory,
+        acpt_numbers,
+        target_years=target_years,
+        collect_integrity=skip_existing,
+        problem_file_limit=body.get("problem_file_limit"),
     )
+    actual_integrity_by_acpt_no = output_summary.pop(
+        "_target_integrity_by_acpt_no",
+        {},
+    )
+    emit(
+        "저장 디렉토리 검사 완료: 대상 HTML/메타데이터 외 파일 없음 · "
+        f"{time.monotonic() - existing_check_started_at:.1f}초."
+    )
+    if replace_invalid_manifest:
+        recorded_source_unavailable: dict[str, dict[str, str]] = {}
+        loaded_manifest_integrity = ("", "", {}, {})
+    else:
+        recorded_source_unavailable = _load_html_manifest_source_unavailable(
+            resolved_output_directory
+        )
+        loaded_manifest_integrity = None
     source_unavailable_by_acpt_no: dict[str, dict[str, str]] = {}
     stale_placeholder_acpt_numbers: set[str] = set()
     for acpt_no, target in target_by_acpt_no.items():
@@ -932,19 +1024,8 @@ def download_disclosure_internal_html_payload(
         else:
             stale_placeholder_acpt_numbers.add(acpt_no)
     download_acpt_numbers = acpt_numbers
-    if bool(body.get("skip_existing", True)):
-        existing_check_started_at = time.monotonic()
+    if skip_existing:
         emit("기존 HTML 구조 및 기준 해시 검사를 시작합니다.")
-        output_summary = _validate_html_output_directory_files(
-            resolved_output_directory,
-            acpt_numbers,
-            target_years=target_years,
-            collect_integrity=True,
-            problem_file_limit=body.get("problem_file_limit"),
-        )
-        actual_integrity_by_acpt_no = output_summary.pop(
-            "_target_integrity_by_acpt_no"
-        )
         stale_placeholder_acpt_numbers.update(
             _unsupported_source_unavailable_acpt_numbers(
                 acpt_numbers=output_summary["existing_target_acpt_numbers"],
@@ -960,6 +1041,7 @@ def download_disclosure_internal_html_payload(
                 "existing_target_acpt_numbers"
             ],
             actual_integrity_by_acpt_no=actual_integrity_by_acpt_no,
+            loaded_manifest_integrity=loaded_manifest_integrity,
         )
         unverified_acpt_numbers = integrity_summary[
             "hash_unverified_target_acpt_numbers"
@@ -1006,10 +1088,6 @@ def download_disclosure_internal_html_payload(
             )
             for acpt_no in existing_acpt_numbers
         }
-        emit(
-            "저장 디렉토리 검사 완료: 대상 HTML/메타데이터 외 파일 없음 · "
-            f"{time.monotonic() - existing_check_started_at:.1f}초."
-        )
         emit(
             "기존 HTML 겹침 확인: "
             f"{output_summary['existing_target_html_count']}/{len(acpt_numbers)}건."
@@ -1213,6 +1291,12 @@ def download_disclosure_internal_html_payload(
         )
     finally:
         _clear_cancel_token(cancel_token)
+    _validate_html_output_directory_files(
+        resolved_output_directory,
+        acpt_numbers,
+        target_years=target_years,
+        problem_file_limit=body.get("problem_file_limit"),
+    )
     saved_acpt_numbers = [path.stem for path in saved_paths]
     if not cancelled and not verification["complete"]:
         _verify_internal_download_membership(

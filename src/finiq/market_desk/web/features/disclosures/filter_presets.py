@@ -171,6 +171,12 @@ def _required_count(value: object, field: str) -> int:
     return count
 
 
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
 def _filter_result_counts(payload: dict[str, Any]) -> tuple[int, int, int, int]:
     summary = payload.get("summary")
     if not isinstance(summary, dict):
@@ -269,6 +275,7 @@ def _validate_filter_result(
     *,
     condition_blocks: list[dict[str, Any]],
     require_complete: bool,
+    require_stored_complete: bool = False,
     allow_legacy_paths: bool = False,
     allow_acpt_scope: bool = False,
 ) -> dict[str, Any]:
@@ -333,19 +340,18 @@ def _validate_filter_result(
             "filter workflow result contains duplicate acpt_no values"
         )
     transfer_acpt_numbers = payload.get("external_html_download_acpt_numbers")
-    if transfer_acpt_numbers is not None:
-        normalized_transfer = (
-            [str(value or "").strip() for value in transfer_acpt_numbers]
-            if isinstance(transfer_acpt_numbers, list)
-            else []
+    if not isinstance(transfer_acpt_numbers, list):
+        raise ValueError("external_html_download_acpt_numbers must be a list")
+    normalized_transfer = [
+        str(value or "").strip() for value in transfer_acpt_numbers
+    ]
+    if (
+        len(normalized_transfer) != len(acpt_numbers)
+        or set(normalized_transfer) != set(acpt_numbers)
+    ):
+        raise _integrity_error(
+            "filter workflow result transfer acpt_no values do not match disclosures"
         )
-        if (
-            len(normalized_transfer) != len(acpt_numbers)
-            or set(normalized_transfer) != set(acpt_numbers)
-        ):
-            raise _integrity_error(
-                "filter workflow result transfer acpt_no values do not match disclosures"
-            )
     unique_titles = payload.get("unique_titles")
     expected_titles = {
         _clean_search_text(str(disclosure.get("title") or "")).strip()
@@ -421,6 +427,8 @@ def _validate_filter_result(
         )
     if source_offset > source_disclosures:
         raise _integrity_error("filter workflow result source offset is invalid")
+    if require_stored_complete and source_offset != 0:
+        raise _integrity_error("stored completed result source_offset must be 0")
     return payload
 
 
@@ -496,9 +504,7 @@ def _read_workflow(
         )
     if normalized.get("parent_mode") is not None:
         fingerprint = str(payload.get("parent_result_fingerprint") or "").strip()
-        if len(fingerprint) != 64 or any(
-            character not in "0123456789abcdef" for character in fingerprint
-        ):
+        if not _is_sha256(fingerprint):
             raise ValueError(
                 "derived filter workflow parent result fingerprint is invalid"
             )
@@ -506,24 +512,46 @@ def _read_workflow(
 
     embedded_result = payload.get("result")
     result_file = str(payload.get("result_file") or "").strip()
+    if not allow_legacy_storage:
+        if "result" in payload:
+            raise ValueError(
+                f"embedded filter workflow result requires migration: {path}"
+            )
+        if result_file and result_file != "filtered.json":
+            raise ValueError(
+                f"completed filter workflow must use filtered.json: {path}"
+            )
+        if result_file:
+            stored_fingerprint = str(
+                payload.get("result_fingerprint") or ""
+            ).strip()
+            if not _is_sha256(stored_fingerprint):
+                raise ValueError(
+                    f"filter workflow result fingerprint is invalid: {path}"
+                )
+            if not _workflow_sidecar_path(path, result_file).is_file():
+                raise ValueError(
+                    f"filter workflow result sidecar does not exist: {path}"
+                )
     has_result = isinstance(embedded_result, dict) or bool(result_file)
     result = embedded_result
     if load_results and result is None and result_file:
         result = _read_json_object(_workflow_sidecar_path(path, result_file))
     if load_results and result is not None:
-        _validate_filter_result(
-            result,
-            condition_blocks=normalized["condition_blocks"],
-            require_complete=True,
-            allow_legacy_paths=allow_legacy_storage,
-            allow_acpt_scope=normalized.get("parent_mode") is not None,
-        )
         result_fingerprint = _canonical_result_sha256(result)
         stored_fingerprint = str(payload.get("result_fingerprint") or "").strip()
         if not stored_fingerprint and not allow_legacy_storage:
             raise ValueError(f"filter workflow result fingerprint is missing: {path}")
         if stored_fingerprint and stored_fingerprint != result_fingerprint:
             raise ValueError(f"filter workflow result fingerprint is invalid: {path}")
+        _validate_filter_result(
+            result,
+            condition_blocks=normalized["condition_blocks"],
+            require_complete=True,
+            require_stored_complete=True,
+            allow_legacy_paths=allow_legacy_storage,
+            allow_acpt_scope=normalized.get("parent_mode") is not None,
+        )
         payload["result"] = result
         payload["_result_file"] = result_file
         payload["_result_fingerprint"] = result_fingerprint
@@ -537,6 +565,27 @@ def _read_workflow(
             )
     embedded_pending = payload.get("pending")
     pending_file = str(payload.get("pending_file") or "").strip()
+    if not allow_legacy_storage:
+        if "pending" in payload:
+            raise ValueError(
+                f"embedded filter workflow pending result requires migration: {path}"
+            )
+        if pending_file and pending_file != "filter.pending.json":
+            raise ValueError(
+                f"interrupted filter workflow must use filter.pending.json: {path}"
+            )
+        if pending_file:
+            stored_fingerprint = str(
+                payload.get("pending_fingerprint") or ""
+            ).strip()
+            if not _is_sha256(stored_fingerprint):
+                raise ValueError(
+                    f"filter workflow pending fingerprint is invalid: {path}"
+                )
+            if not _workflow_sidecar_path(path, pending_file).is_file():
+                raise ValueError(
+                    f"filter workflow pending sidecar does not exist: {path}"
+                )
     has_pending = isinstance(embedded_pending, dict) or bool(pending_file)
     pending = embedded_pending
     if load_results and pending is None and pending_file:
@@ -940,17 +989,7 @@ def _completed_parent_result(
 
 
 def _completed_parent_fingerprint(data_root: object, parent_mode: object) -> str:
-    parent = validate_workspace_mode(parent_mode)
-    parent_path = _workflow_path(data_root, parent)
-    if not parent_path.is_file():
-        raise ValueError(f"Parent filter workflow not found: {parent}")
-    _document, workflow = _read_workflow(parent_path, load_results=False)
-    if workflow["status"] != "completed":
-        raise ValueError(f"Parent filter workflow is not completed: {parent}")
-    fingerprint = str(workflow.get("result_fingerprint") or "").strip()
-    if not fingerprint:
-        _document, workflow = _read_workflow(parent_path)
-        fingerprint = str(workflow.get("result_fingerprint") or "").strip()
+    _result, fingerprint = _completed_parent_result(data_root, parent_mode)
     return fingerprint
 
 
@@ -1025,6 +1064,28 @@ def load_filter_workflow_result_payload(
         ):
             raise ValueError(f"Filter workflow is not completed: {requested['mode']}")
         return copy.deepcopy(document["result"])
+
+
+def load_completed_filter_workflow_payload(
+    *,
+    data_root: object,
+    mode: object,
+    parent_mode: object = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    path = _workflow_path(data_root, mode, parent_mode)
+    with _WORKFLOWS_LOCK:
+        if not path.is_file():
+            raise ValueError(f"Filter workflow not found: {validate_workspace_mode(mode)}")
+        document, workflow = _read_workflow(path)
+        _require_current_parent(data_root=data_root, workflow=workflow)
+        result = document.get("result")
+        if workflow["status"] != "completed" or not isinstance(result, dict):
+            raise ValueError(f"Filter workflow is not completed: {workflow['mode']}")
+        if document.get("_result_file") != "filtered.json":
+            raise ValueError(
+                f"Completed filter workflow must use filtered.json: {path}"
+            )
+        return copy.deepcopy(result), copy.deepcopy(workflow)
 
 
 def _working_path(path: Path, run_id: str) -> Path:
@@ -1259,6 +1320,7 @@ def complete_filter_workflow_payload(
     run_id: str,
     result: object,
     parent_mode: object = None,
+    external_html_transfer_path: object = None,
 ) -> dict[str, Any]:
     path = _workflow_path(data_root, mode, parent_mode)
     with _WORKFLOWS_LOCK:
@@ -1311,6 +1373,24 @@ def complete_filter_workflow_payload(
                 "parent_result_fingerprint"
             ]
 
+        transfer: dict[str, Any] | None = None
+        if external_html_transfer_path is not None:
+            output_directory = _filter_output_directory(
+                external_html_transfer_path
+            )
+            transfer_path = _filter_transfer_path(
+                output_directory=output_directory,
+                mode=workflow["mode"],
+                parent_mode=workflow.get("parent_mode"),
+            )
+            if transfer_path != path.with_name("filtered.json").resolve():
+                transfer = _write_filter_transfer_file(
+                    copy.deepcopy(merged_result),
+                    output_directory=output_directory,
+                    mode=workflow["mode"],
+                    parent_mode=workflow.get("parent_mode"),
+                )
+
         document["status"] = "completed"
         _set_workflow_result(document, merged_result)
         _set_workflow_pending(document, None)
@@ -1325,7 +1405,18 @@ def complete_filter_workflow_payload(
         _discard_working_workflow(working_path)
         _ACTIVE_RUNS.pop(_active_key(path), None)
         _document, completed_workflow = _read_workflow(path)
-        return {**completed_workflow, "result": merged_result}
+        if external_html_transfer_path is not None and transfer is None:
+            transfer = {
+                "format": merged_result.get("format", ""),
+                "path": str(path.with_name("filtered.json").resolve()),
+                "acpt_numbers": len(
+                    merged_result["external_html_download_acpt_numbers"]
+                ),
+            }
+        response = {**completed_workflow, "result": merged_result}
+        if transfer is not None:
+            response["external_html_download_transfer"] = transfer
+        return response
 
 
 def interrupt_filter_workflow_payload(
@@ -1634,6 +1725,28 @@ def _filter_output_directory(value: object) -> str:
     return str(output_root)
 
 
+def _filter_transfer_path(
+    *,
+    output_directory: str,
+    mode: object,
+    parent_mode: object = None,
+) -> Path:
+    normalized_mode = validate_workspace_mode(mode)
+    output_root = Path(_filter_output_directory(output_directory))
+    if parent_mode is not None and str(parent_mode).strip():
+        normalized_parent = validate_workspace_mode(parent_mode)
+        if normalized_parent == normalized_mode:
+            raise ValueError("parent_mode must be different from mode")
+        return (
+            output_root
+            / normalized_parent
+            / "subfilters"
+            / normalized_mode
+            / "filtered.json"
+        ).resolve()
+    return (output_root / normalized_mode / "filtered.json").resolve()
+
+
 def _write_filter_transfer_file(
     payload: dict[str, Any],
     *,
@@ -1642,20 +1755,11 @@ def _write_filter_transfer_file(
     parent_mode: object = None,
 ) -> dict[str, Any]:
     normalized_mode = validate_workspace_mode(mode)
-    output_root = Path(_filter_output_directory(output_directory))
-    if parent_mode is not None and str(parent_mode).strip():
-        normalized_parent = validate_workspace_mode(parent_mode)
-        if normalized_parent == normalized_mode:
-            raise ValueError("parent_mode must be different from mode")
-        transfer_path = (
-            output_root
-            / normalized_parent
-            / "subfilters"
-            / normalized_mode
-            / "filtered.json"
-        )
-    else:
-        transfer_path = output_root / normalized_mode / "filtered.json"
+    transfer_path = _filter_transfer_path(
+        output_directory=output_directory,
+        mode=normalized_mode,
+        parent_mode=parent_mode,
+    )
 
     payload["mode"] = normalized_mode
     acpt_numbers = payload.get("external_html_download_acpt_numbers")
@@ -1722,17 +1826,11 @@ def execute_filter_workflow_payload(
             run_id=workflow_run["run_id"],
             result=payload,
             parent_mode=workflow_run.get("parent_mode"),
+            external_html_transfer_path=body.get("external_html_transfer_path"),
         )
         merged_result = completed_workflow.pop("result")
-        merged_result["external_html_download_transfer"] = (
-            _write_filter_transfer_file(
-                merged_result,
-                output_directory=str(
-                    body.get("external_html_transfer_path") or ""
-                ).strip(),
-                mode=body.get("mode"),
-                parent_mode=body.get("parent_mode"),
-            )
+        merged_result["external_html_download_transfer"] = completed_workflow.pop(
+            "external_html_download_transfer"
         )
         merged_result["filter_workflow"] = completed_workflow
         return merged_result

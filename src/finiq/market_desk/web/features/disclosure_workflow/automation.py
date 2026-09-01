@@ -367,16 +367,29 @@ def _stage_output_paths(profile: dict[str, Any], stage: int) -> list[Path]:
 
 
 def _stage_output_fingerprint(profile: dict[str, Any], stage: int) -> str:
+    def file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    use_content_hash = stage in {4, 5}
     snapshots: list[dict[str, Any]] = []
     for output_index, output_path in enumerate(_stage_output_paths(profile, stage)):
         if output_path.is_file():
-            stat = output_path.stat()
             snapshots.append(
                 {
                     "output": output_index,
                     "path": ".",
-                    "size": stat.st_size,
-                    "mtime_ns": stat.st_mtime_ns,
+                    **(
+                        {"sha256": file_sha256(output_path)}
+                        if use_content_hash
+                        else {
+                            "size": output_path.stat().st_size,
+                            "mtime_ns": output_path.stat().st_mtime_ns,
+                        }
+                    ),
                 }
             )
             continue
@@ -394,13 +407,18 @@ def _stage_output_fingerprint(profile: dict[str, Any], stage: int) -> str:
                     }
                 )
             elif child.is_file():
-                stat = child.stat()
                 snapshots.append(
                     {
                         "output": output_index,
                         "path": relative_path,
-                        "size": stat.st_size,
-                        "mtime_ns": stat.st_mtime_ns,
+                        **(
+                            {"sha256": file_sha256(child)}
+                            if use_content_hash
+                            else {
+                                "size": child.stat().st_size,
+                                "mtime_ns": child.stat().st_mtime_ns,
+                            }
+                        ),
                     }
                 )
     return _canonical_hash(snapshots)
@@ -637,6 +655,11 @@ def _html_inspection_details(payload: dict[str, Any]) -> dict[str, Any]:
             "missing_target_html_count",
             "invalid_target_html_count",
             "unexpected_file_count",
+            "hash_verified_target_html_count",
+            "hash_unverified_target_html_count",
+            "hash_mismatch_target_html_count",
+            "manifest_invalid",
+            "manifest_error",
             "missing_target_acpt_numbers",
             "invalid_target_acpt_numbers",
             "unexpected_files",
@@ -704,6 +727,8 @@ def _inspect_detail_external_html(profile: dict[str, Any]) -> dict[str, Any]:
 def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
     checked = check_disclosure_html_output_directory_payload(
         {
+            "data_root": profile["data_root"],
+            "mode": profile["execution"]["mode"],
             "source_compressed_json_path": str(
                 _external_compress_mode_directory(profile)
                 / "compressed-external-html.json"
@@ -716,7 +741,11 @@ def _inspect_detail_internal_html(profile: dict[str, Any]) -> dict[str, Any]:
         int(checked.get("missing_target_html_count") or 0)
         or int(checked.get("invalid_target_html_count") or 0)
         or int(checked.get("unexpected_file_count") or 0)
+        or int(checked.get("hash_mismatch_target_html_count") or 0)
+        or int(checked.get("hash_unverified_target_html_count") or 0)
+        or checked.get("manifest_invalid") is True
         or int(checked.get("existing_target_html_count") or 0) != requested
+        or int(checked.get("hash_verified_target_html_count") or 0) != requested
     ):
         return _inspection_failure(
             5,

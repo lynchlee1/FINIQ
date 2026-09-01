@@ -1060,6 +1060,22 @@ def test_workspace_links_override_explicit_stage_paths(tmp_path: Path) -> None:
         / "compressed-external-html.json"
     )
 
+    parsed_read = apply_workspace_defaults(
+        "parse_read",
+        {
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "input_directory": str(explicit / "sections"),
+            "output_path": str(explicit / "converted"),
+        },
+    )
+    assert parsed_read["input_directory"] == str(
+        target_root / "06-sections" / "bond_issuance"
+    )
+    assert parsed_read["output_path"] == str(
+        target_root / "07-converted" / "bond_issuance"
+    )
+
 
 def test_external_html_save_and_compress_storage_links_are_independent(
     tmp_path: Path,

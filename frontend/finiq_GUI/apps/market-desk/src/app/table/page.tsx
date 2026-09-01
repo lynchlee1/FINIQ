@@ -348,6 +348,10 @@ export default function TablePage() {
                 dataRoot={dataRoot}
                 stages={["02-table"]}
                 disabled={!!activeJobId || inspectionRunning}
+                onChanged={() => {
+                  setOutputPath(useSettingsStore.getState().sqlite_output_directory);
+                  clearInspection();
+                }}
                 onError={handlePathError}
               />
               <div className="space-y-3">

@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 import pytest
 import finiq.market_desk.web.app as web_app
 import finiq.market_desk.web.features.disclosures.filter_presets as filter_presets
+from tests.market_desk.filter_workflow_fixtures import (
+    publish_completed_filter_result,
+)
 from finiq.market_desk.web.app import _normalize_file_dialog_mode, app, config
 from finiq.config import AppConfig
 from finiq.market_desk.web.jobs import JobManager, job_manager
@@ -162,37 +165,10 @@ def _external_workspace_body(
     tmp_path: Path, source_json: dict, **body: object
 ) -> dict[str, object]:
     data_root = tmp_path / "workspace"
-    _save_filter_workflow(data_root)
-    filtered_path = data_root / "03-filter" / "bond_issuance" / "filtered.json"
-    filtered_path.parent.mkdir(parents=True, exist_ok=True)
-    normalized_source_json = dict(source_json)
-    if isinstance(source_json.get("disclosures"), list):
-        normalized_source_json["disclosures"] = [
-            {
-                **disclosure,
-                "disclosed_at": disclosure.get("disclosed_at")
-                or f"{str(disclosure.get('acpt_no') or '')[:4]}-01-01",
-            }
-            for disclosure in source_json["disclosures"]
-            if isinstance(disclosure, dict)
-        ]
-    filtered = {"format": "kind_disclosure_filter_v1", **normalized_source_json}
-    filtered_path.write_text(json.dumps(filtered), encoding="utf-8")
-    workflow_path = filtered_path.with_name("filter.json")
-    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
-    workflow.pop("result", None)
-    workflow.pop("pending", None)
-    workflow.update(
-        {
-            "status": "completed",
-            "result_file": filtered_path.name,
-            "result_fingerprint": filter_presets._canonical_result_sha256(filtered),
-        }
-    )
-    workflow["steps"]["database_query"]["status"] = "completed"
-    workflow["steps"]["record"]["status"] = "completed"
-    workflow_path.write_text(
-        json.dumps(workflow, ensure_ascii=False), encoding="utf-8"
+    publish_completed_filter_result(
+        data_root,
+        mode="bond_issuance",
+        payload=source_json,
     )
     return {"data_root": str(data_root), "mode": "bond_issuance", **body}
 
@@ -813,6 +789,51 @@ def test_filter_disclosures_stream_writes_transfer_file(tmp_path: Path, monkeypa
         "search_result_disclosures": 2,
         "inspected_disclosures": 2,
     }
+
+
+def test_filter_disclosures_marks_workflow_failed_when_transfer_write_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        web_app,
+        "filter_disclosures_payload",
+        lambda body, **_kwargs: _filter_result(
+            source_disclosures=1,
+            source_offset=int(body["source_offset"]),
+            disclosures=[{"acpt_no": "1", "title": "A"}],
+        ),
+    )
+    monkeypatch.setattr(
+        filter_presets,
+        "_write_filter_transfer_file",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            OSError("simulated transfer failure")
+        ),
+    )
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+
+    response = TestClient(app).post(
+        "/api/disclosures/filter",
+        json={
+            "data_root": str(data_root),
+            "mode": "bond_issuance",
+            "filter_blocks": [],
+            "external_html_transfer_path": str(tmp_path / "separate-output"),
+        },
+    )
+
+    assert response.status_code == 400
+    workflow = json.loads(
+        (data_root / "03-filter" / "bond_issuance" / "filter.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert workflow["status"] == "failed"
+    assert workflow["steps"]["record"]["status"] == "failed"
+    assert not (
+        tmp_path / "separate-output" / "bond_issuance" / "filtered.json"
+    ).exists()
 
 
 def test_filter_disclosures_runs_derived_filter_with_parent_membership(
@@ -1480,6 +1501,10 @@ def test_filter_workflow_rejects_missing_acpt_no() -> None:
             "transfer acpt_no values do not match",
         ),
         (
+            lambda result: result.pop("external_html_download_acpt_numbers"),
+            "external_html_download_acpt_numbers must be a list",
+        ),
+        (
             lambda result: result.update({"unique_titles": ["different"]}),
             "unique titles do not match",
         ),
@@ -1498,6 +1523,34 @@ def test_filter_workflow_rejects_invalid_result_metadata(mutate, message: str) -
             result,
             condition_blocks=[],
             require_complete=True,
+        )
+
+
+def test_filter_inspection_rejects_nonzero_offset_in_stored_completed_result(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20250101000001", "title": "A"}],
+    )
+    result = _filter_result(
+        source_disclosures=2,
+        source_offset=1,
+        disclosures=[{"acpt_no": "20250101000002", "title": "B"}],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    result_path = workflow_path.with_name("filtered.json")
+    result_path.write_text(json.dumps(result), encoding="utf-8")
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["result_fingerprint"] = filter_presets._canonical_result_sha256(result)
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="stored completed result source_offset must be 0"):
+        filter_presets.manage_filter_presets_payload(
+            {"data_root": str(data_root), "action": "inspect"}
         )
 
 
@@ -1959,6 +2012,27 @@ def test_filter_list_does_not_read_split_result_sidecar(
     assert listed["presets"][0]["result_summary"]["returned_disclosures"] == 1
 
 
+def test_filter_list_rejects_invalid_result_fingerprint_metadata(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root)
+    _complete_filter_workflow(
+        data_root,
+        mode="bond_issuance",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    workflow_path = data_root / "03-filter" / "bond_issuance" / "filter.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["result_fingerprint"] = "not-a-sha256"
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="result fingerprint is invalid"):
+        filter_presets.manage_filter_presets_payload(
+            {"data_root": str(data_root), "action": "list"}
+        )
+
+
 def test_legacy_embedded_filter_result_migrates_to_split_storage(
     tmp_path: Path,
 ) -> None:
@@ -1983,6 +2057,11 @@ def test_legacy_embedded_filter_result_migrates_to_split_storage(
     legacy_document["pending"] = None
     workflow_path.write_text(json.dumps(legacy_document), encoding="utf-8")
     result_path.unlink()
+
+    with pytest.raises(ValueError, match="requires migration"):
+        filter_presets.manage_filter_presets_payload(
+            {"data_root": str(data_root), "action": "inspect"}
+        )
 
     migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
 
@@ -2238,6 +2317,11 @@ def test_hashed_filter_result_migrates_to_canonical_filename(tmp_path: Path) -> 
     canonical_result_path.rename(hashed_result_path)
     document["result_file"] = hashed_result_path.name
     workflow_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must use filtered.json"):
+        filter_presets.manage_filter_presets_payload(
+            {"data_root": str(data_root), "action": "list"}
+        )
 
     migrated = filter_presets.migrate_filter_workflow_storage(str(data_root))
 
@@ -2533,6 +2617,36 @@ def test_derived_filter_rejects_missing_incomplete_and_stale_parent(
     assert inspected_parent["status"] == "completed"
     assert inspected_child["status"] == "failed"
     assert "stale because parent result changed" in inspected_child["parent_error"]
+
+
+def test_derived_filter_save_rejects_missing_parent_result_sidecar(
+    tmp_path: Path,
+) -> None:
+    data_root = tmp_path / "workspace"
+    _save_filter_workflow(data_root, mode="parent")
+    _complete_filter_workflow(
+        data_root,
+        mode="parent",
+        disclosures=[{"acpt_no": "20260101000001", "title": "A"}],
+    )
+    (data_root / "03-filter" / "parent" / "filtered.json").unlink()
+
+    with pytest.raises(ValueError, match="result sidecar does not exist"):
+        filter_presets.manage_filter_presets_payload(
+            {
+                "data_root": str(data_root),
+                "action": "save",
+                "preset": {
+                    "mode": "child",
+                    "parent_mode": "parent",
+                    "condition_blocks": [],
+                },
+            }
+        )
+
+    assert not (
+        data_root / "03-filter" / "parent" / "subfilters" / "child" / "filter.json"
+    ).exists()
 
 
 def test_parent_filter_delete_is_blocked_while_derived_filter_exists(
@@ -2938,6 +3052,22 @@ def test_internal_html_all_mode_inspection_aggregates_owner_totals(
         "apply_workspace_defaults",
         lambda kind, payload, create_workspace=False: {**payload, "kind": kind},
     )
+    monkeypatch.setattr(
+        html_cleanup,
+        "_load_workspace_filtered_payload",
+        lambda payload: (
+            {
+                "format": "kind_disclosure_filter_v1",
+                "disclosures": [
+                    {
+                        "acpt_no": f'{payload["mode"]}-target',
+                        "disclosed_at": "2025-01-01",
+                    }
+                ],
+            },
+            "filtered.json",
+        ),
+    )
 
     def fake_counts(payload: dict[str, object]) -> dict[str, object]:
         assert payload["kind"] == "internal_html_download"
@@ -3033,6 +3163,7 @@ def test_internal_html_redownload_processes_only_failed_owner_modes(
         cancel_check: object = None,
         *,
         redownload_unverified_existing: bool = False,
+        replace_invalid_manifest: bool = False,
     ) -> dict[str, object]:
         downloaded_payloads.append(
             (body, redownload_unverified_existing)

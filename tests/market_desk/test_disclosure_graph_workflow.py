@@ -11,34 +11,34 @@ from finiq.market_desk.web.features.disclosures.disclosure_graph import (
     build_disclosure_graph_payload,
     load_disclosure_graph_payload,
 )
+from tests.market_desk.filter_workflow_fixtures import (
+    publish_completed_filter_result,
+)
 
 
 def _write_rights_sources(data_root: Path) -> None:
-    filtered_path = data_root / "03-filter" / "rights_issuance" / "filtered.json"
     parsed_path = (
         data_root
         / "07-converted"
         / "rights_issuance"
         / "parsed-rights_issuance.json"
     )
-    filtered_path.parent.mkdir(parents=True)
     parsed_path.parent.mkdir(parents=True)
-    filtered_path.write_text(
-        json.dumps(
-            {
-                "disclosures": [
-                    {
-                        "acpt_no": "20260430001640",
-                        "company_id": "005930",
-                        "company_name": "테스트전자",
-                        "market": "코스피",
-                        "disclosed_date": "2026-04-30",
-                    }
-                ]
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    publish_completed_filter_result(
+        data_root,
+        mode="rights_issuance",
+        payload={
+            "disclosures": [
+                {
+                    "acpt_no": "20260430001640",
+                    "company_id": "005930",
+                    "company_name": "테스트전자",
+                    "market": "코스피",
+                    "disclosed_at": "2026-04-30 09:00",
+                    "disclosed_date": "2026-04-30",
+                }
+            ]
+        },
     )
     parsed_path.write_text(
         json.dumps(
@@ -147,6 +147,27 @@ def test_build_disclosure_graph_payload_rejects_incomplete_mode(
 
     with pytest.raises(ValueError, match="bond_issuance.*입력이 완전하지 않습니다"):
         build_disclosure_graph_payload({"data_root": str(tmp_path)})
+
+
+def test_build_disclosure_graph_rejects_failed_filter_workflow(
+    tmp_path: Path,
+) -> None:
+    _write_rights_sources(tmp_path)
+    workflow_path = tmp_path / "03-filter" / "rights_issuance" / "filter.json"
+    workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+    workflow["status"] = "failed"
+    workflow["steps"]["record"] = {
+        "status": "failed",
+        "error": "publish failed",
+    }
+    workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="Filter workflow is not completed"):
+        build_disclosure_graph_payload({"data_root": str(tmp_path)})
+
+    assert not (
+        tmp_path / "09-disclosure-graph" / "disclosure-graph.json"
+    ).exists()
 
 
 def test_load_disclosure_graph_payload_returns_saved_document(tmp_path: Path) -> None:

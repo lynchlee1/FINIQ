@@ -57,6 +57,8 @@ export type DownloadSavedFilters = Pick<
 
 export type DownloadExistingPayload = Pick<
   DownloadPayload,
+  | "data_root"
+  | "separate_output_directory"
   | "output_directory"
   | "start_date"
   | "end_date"
