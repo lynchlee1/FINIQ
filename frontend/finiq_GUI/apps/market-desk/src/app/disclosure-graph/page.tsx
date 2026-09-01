@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Loader2, Network } from "lucide-react";
+import { FlaskConical, Loader2, Network } from "lucide-react";
 import { Button } from "@finiq/ui";
 import type { GraphData } from "@finiq/graph-viewer";
 import { apiPost } from "@/api/client";
@@ -16,6 +16,11 @@ import { DATA_PATH_LABELS } from "@/components/data-path/DataPathCard";
 import { useSettingsStore } from "@/store/useSettingsStore";
 import { formatInteger } from "@/lib/format";
 import type { OntologyNodeGraphProps } from "../graph/OntologyNodeGraph";
+import { GovernanceTransitionMonitor } from "./GovernanceTransitionMonitor";
+import {
+  DAEYANG_CROWDWORKS_GOVERNANCE_GRAPH,
+  DAEYANG_CROWDWORKS_TEST_CASE,
+} from "./crowdworksGovernanceTestData";
 
 const OntologyNodeGraph = dynamic<OntologyNodeGraphProps>(
   () => import("../graph/OntologyNodeGraph").then((module) => module.OntologyNodeGraph),
@@ -46,6 +51,17 @@ type DisclosureGraphBuildResult = {
   total_edges: number;
 };
 
+const GOVERNANCE_TEST_GRAPH_DOCUMENT: DisclosureGraphDocument = {
+  format: "finiq_disclosure_graph_v1",
+  metadata: {
+    built_at: "2026-08-31T00:00:00+09:00",
+    total_nodes: DAEYANG_CROWDWORKS_GOVERNANCE_GRAPH.nodes.length,
+    total_edges: DAEYANG_CROWDWORKS_GOVERNANCE_GRAPH.edges.length,
+  },
+  nodes: DAEYANG_CROWDWORKS_GOVERNANCE_GRAPH.nodes,
+  edges: DAEYANG_CROWDWORKS_GOVERNANCE_GRAPH.edges,
+};
+
 const MODE_LABELS: Record<string, string> = {
   rights_issuance: "유무상증자",
   bond_issuance: "사채발행",
@@ -60,10 +76,11 @@ export default function DisclosureGraphPage() {
   } = useSettingsStore();
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [working, setWorking] = useState(false);
-  const [status, setStatus] = useState("그래프를 생성하거나 저장 결과를 불러오세요.");
+  const [status, setStatus] = useState("지배구조 변화 테스트 사례를 표시하고 있습니다.");
   const [isError, setIsError] = useState(false);
-  const [graphDocument, setGraphDocument] = useState<DisclosureGraphDocument | null>(null);
+  const [graphDocument, setGraphDocument] = useState<DisclosureGraphDocument>(GOVERNANCE_TEST_GRAPH_DOCUMENT);
   const [buildResult, setBuildResult] = useState<DisclosureGraphBuildResult | null>(null);
+  const [showGovernanceMonitor, setShowGovernanceMonitor] = useState(true);
 
   useEffect(() => {
     fetchSettings()
@@ -96,7 +113,16 @@ export default function DisclosureGraphPage() {
       { data_root: root },
     );
     setGraphDocument(document);
+    setShowGovernanceMonitor(false);
     return document;
+  };
+
+  const handleShowTestData = () => {
+    setGraphDocument(GOVERNANCE_TEST_GRAPH_DOCUMENT);
+    setBuildResult(null);
+    setShowGovernanceMonitor(true);
+    setIsError(false);
+    setStatus("지배구조 변화 테스트 사례를 표시하고 있습니다.");
   };
 
   const handleBuild = async () => {
@@ -161,11 +187,19 @@ export default function DisclosureGraphPage() {
       description="03단계 필터 결과와 07단계 파싱 결과를 관계 그래프 형식으로 저장하고 Obsidian 형태로 탐색합니다."
     >
       <div className="space-y-6">
+        {showGovernanceMonitor ? (
+          <GovernanceTransitionMonitor caseData={DAEYANG_CROWDWORKS_TEST_CASE} />
+        ) : null}
+
         <HtmlWorkflowCard
           title="그래프 데이터"
           description="작업공간의 표준 입력을 읽어 09-disclosure-graph/disclosure-graph.json에 저장합니다."
           actions={
             <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={handleShowTestData} disabled={working}>
+                <FlaskConical className="mr-2 h-4 w-4" />
+                테스트 데이터 보기
+              </Button>
               <Button type="button" variant="outline" onClick={handleLoad} disabled={working || settingsLoading}>
                 저장 결과 불러오기
               </Button>
@@ -197,7 +231,7 @@ export default function DisclosureGraphPage() {
           <OntologyNodeGraph
             selectedCompany={null}
             panel={null}
-            selectedCompanyLabel="공시 관계 그래프"
+            selectedCompanyLabel={showGovernanceMonitor ? DAEYANG_CROWDWORKS_TEST_CASE.name : "공시 관계 그래프"}
             loading={working}
             graphData={graphData}
             layoutKey="stage-09-disclosure-graph"
