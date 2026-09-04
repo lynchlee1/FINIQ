@@ -1,0 +1,231 @@
+{
+  "format": "finiq_disclosure_graph_v2",
+  "metadata": {
+    "built_at": "2026-09-02T00:00:00+09:00",
+    "sample": true,
+    "sample_name": "대양금속-크라우드웍스 entity 관계",
+    "total_nodes": 6,
+    "total_edges": 6
+  },
+  "nodes": [
+    {
+      "id": "company_355390",
+      "label": "크라우드웍스",
+      "type": "Company",
+      "group": "Company",
+      "tags": ["Entity", "Company"],
+      "properties": {
+        "stock_code": "355390",
+        "market": "KOSDAQ",
+        "sample": true
+      }
+    },
+    {
+      "id": "company_009190",
+      "label": "대양금속",
+      "type": "Company",
+      "group": "Company",
+      "tags": ["Entity", "Company"],
+      "properties": {
+        "stock_code": "009190",
+        "market": "KOSPI",
+        "sample": true
+      }
+    },
+    {
+      "id": "org_엑스알피1호조합",
+      "label": "엑스알피1호조합",
+      "type": "Organization",
+      "group": "Organization",
+      "tags": ["Entity", "Organization"],
+      "properties": {
+        "sample": true
+      }
+    },
+    {
+      "id": "org_디와이엠파트너스",
+      "label": "디와이엠파트너스",
+      "type": "Organization",
+      "group": "Organization",
+      "tags": ["Entity", "Organization"],
+      "properties": {
+        "sample": true
+      }
+    },
+    {
+      "id": "person_009190_공갑상",
+      "label": "공갑상",
+      "type": "Person",
+      "group": "Person",
+      "tags": ["Entity", "Person"],
+      "properties": {
+        "sample": true
+      }
+    },
+    {
+      "id": "person_355390_박민우",
+      "label": "박민우",
+      "type": "Person",
+      "group": "Person",
+      "tags": ["Entity", "Person"],
+      "properties": {
+        "sample": true
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "sample_edge_xrp_crowdworks",
+      "source": "org_엑스알피1호조합",
+      "target": "company_355390",
+      "relation": "SHAREHOLDER_OF",
+      "category": "SHAREHOLDER_OF",
+      "weight": 12.68,
+      "directed": true,
+      "properties": {
+        "ownership_percent": 12.68,
+        "is_active": true,
+        "parser_mode": "rights_issuance",
+        "provenance": {
+          "acpt_no": "20260206902226",
+          "field_refs": ["발행대상자[0]"]
+        },
+        "evidence": {
+          "document_title": "유상증자결정",
+          "acpt_no": "20260206902226",
+          "disclosed_date": "2026-02-06",
+          "details": {
+            "배정주식수": 1973903,
+            "관계": "최대주주"
+          }
+        }
+      }
+    },
+    {
+      "id": "sample_edge_daeyang_crowdworks",
+      "source": "company_009190",
+      "target": "company_355390",
+      "relation": "ACQUIRED",
+      "category": "ACQUIRED",
+      "weight": 4000000000,
+      "directed": true,
+      "properties": {
+        "parser_mode": "bond_issuance",
+        "disclosure_target_id": "security_20260713000711",
+        "provenance": {
+          "acpt_no": "20260713000711",
+          "field_refs": ["투자자[0]"]
+        },
+        "evidence": {
+          "document_title": "전환사채권발행결정",
+          "acpt_no": "20260713000711",
+          "disclosed_date": "2026-07-13",
+          "details": {
+            "사채종류": "제2회차 전환사채",
+            "투자금액": 4000000000
+          }
+        }
+      }
+    },
+    {
+      "id": "sample_edge_crowdworks_daeyang",
+      "source": "company_355390",
+      "target": "company_009190",
+      "relation": "TRANSFEREE_OF",
+      "category": "TRANSFEREE_OF",
+      "weight": 11997566100,
+      "directed": true,
+      "properties": {
+        "ownership_percent": 4.8,
+        "parser_mode": "shareholder_meeting",
+        "disclosure_target_id": "agenda_20260806000432_0",
+        "provenance": {
+          "acpt_no": "20260806000432",
+          "field_refs": ["relationships[0]"]
+        },
+        "evidence": {
+          "document_title": "타법인주식및출자증권양수결정",
+          "acpt_no": "20260806000432",
+          "disclosed_date": "2026-08-06",
+          "details": {
+            "양수주식수": 2726100,
+            "양수금액": 11997566100
+          }
+        }
+      }
+    },
+    {
+      "id": "sample_edge_dym_daeyang",
+      "source": "org_디와이엠파트너스",
+      "target": "company_009190",
+      "relation": "SHAREHOLDER_OF",
+      "category": "SHAREHOLDER_OF",
+      "weight": 14.35,
+      "directed": true,
+      "properties": {
+        "ownership_percent": 14.35,
+        "is_active": true,
+        "provenance": {
+          "acpt_no": "sample-20251001-01",
+          "field_refs": ["relationships[0]"]
+        },
+        "evidence": {
+          "document_title": "최대주주변경",
+          "acpt_no": "sample-20251001-01",
+          "disclosed_date": "2025-10-01",
+          "details": {
+            "관계": "최대주주"
+          }
+        }
+      }
+    },
+    {
+      "id": "sample_edge_gong_dym",
+      "source": "person_009190_공갑상",
+      "target": "org_디와이엠파트너스",
+      "relation": "SHAREHOLDER_OF",
+      "category": "SHAREHOLDER_OF",
+      "weight": 1,
+      "directed": true,
+      "properties": {
+        "is_active": true,
+        "provenance": {
+          "acpt_no": "sample-20251001-02",
+          "field_refs": ["entities[0]"]
+        },
+        "evidence": {
+          "document_title": "최대주주변경",
+          "acpt_no": "sample-20251001-02",
+          "disclosed_date": "2025-10-01",
+          "details": {
+            "관계": "지배주주"
+          }
+        }
+      }
+    },
+    {
+      "id": "sample_edge_park_crowdworks",
+      "source": "person_355390_박민우",
+      "target": "company_355390",
+      "relation": "SHAREHOLDER_OF",
+      "category": "SHAREHOLDER_OF",
+      "weight": 1,
+      "directed": true,
+      "properties": {
+        "is_active": false,
+        "provenance": {
+          "acpt_no": "sample-20260206-01",
+          "field_refs": ["relationships[1]"]
+        },
+        "evidence": {
+          "document_title": "최대주주변경",
+          "acpt_no": "sample-20260206-01",
+          "disclosed_date": "2026-02-06",
+          "details": {
+            "관계": "이전 최대주주"
+          }
+        }
+      }
+    }
+  ]
+}

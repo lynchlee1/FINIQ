@@ -28,6 +28,29 @@ def _record_pair_rows(record: dict[str, Any], field: str) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _current_parsed_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    current_records: list[dict[str, Any]] = []
+    for record in payload.get("records", []):
+        if not isinstance(record, dict):
+            continue
+        family_id = str(record.get("family_id") or "").strip()
+        if not family_id:
+            current_records.append(record)
+            continue
+        current_sequence = record.get("current_sequence")
+        family_member_count = record.get("family_member_count")
+        if (
+            isinstance(current_sequence, int)
+            and not isinstance(current_sequence, bool)
+            and isinstance(family_member_count, int)
+            and not isinstance(family_member_count, bool)
+            and family_member_count > 0
+            and current_sequence == family_member_count - 1
+        ):
+            current_records.append(record)
+    return current_records
+
+
 # Suffixes/Keywords to distinguish Organization/Company from Person
 ORG_COMPANY_PATTERNS = [
     r"\(주\)",
@@ -303,7 +326,7 @@ def _process_rights_issuance(
             acpt = disc.get("acpt_no")
             if acpt:
                 filtered_map[acpt] = disc
-    records = parsed_data.get("records", [])
+    records = _current_parsed_records(parsed_data)
 
     for rec in records:
         acpt_no = rec.get("acpt_no")
@@ -388,7 +411,7 @@ def _process_rights_issuance(
 
         # Extract Securities issued
         security_prices = {sec_type: price for sec_type, price in _record_pair_rows(rec, "\ubc1c\ud589\uac00\uc561")}
-        main_security_node_id = None
+        issued_security_ids: list[str] = []
 
         for sec_type, count in _record_pair_rows(rec, "\uc2e0\uc8fc\uc758 \uc885\ub958\uc640 \uc218"):
             if not count or count <= 0:
@@ -411,8 +434,7 @@ def _process_rights_issuance(
             else:
                 metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
 
-            if not main_security_node_id:
-                main_security_node_id = sec_id
+            issued_security_ids.append(sec_id)
 
             # Edge: IssuanceEvent -[ISSUED]-> Security
             edges.append(
@@ -480,7 +502,7 @@ def _process_rights_issuance(
             )
 
         # Extract Investors
-        for target_name, target_shares in _record_pair_rows(rec, "\ubc1c\ud589\ub300\uc0c1\uc790"):
+        for target_index, (target_name, target_shares) in enumerate(_record_pair_rows(rec, "\ubc1c\ud589\ub300\uc0c1\uc790")):
             target_name = target_name.strip()
             if not target_name or target_name == "-":
                 continue
@@ -533,8 +555,7 @@ def _process_rights_issuance(
                     else:
                         metadata["validation_summary"]["duplicate_nodes_resolved"] += 1
 
-            # Edge: Investor -[ACQUIRED]-> Security (prefer main security, or fallback to event_id)
-            target_node_id = main_security_node_id or event_id
+            target_node_id = issued_security_ids[0] if len(issued_security_ids) == 1 else event_id
             edges.append(
                 GraphEdge(
                     source_id=investor_id,
@@ -546,6 +567,15 @@ def _process_rights_issuance(
                     properties={
                         "acpt_no": acpt_no,
                         "shares": shares,
+                        "parser_mode": "rights_issuance",
+                        "issuer_id": company_node_id,
+                        "provenance": {
+                            "fact_id": f"fact:rights_issuance:{acpt_no}:allottee:{target_index}",
+                            "parser_mode": "rights_issuance",
+                            "acpt_no": acpt_no,
+                            "template_id": "rights_allottee_v1",
+                            "field_refs": [f"\ubc1c\ud589\ub300\uc0c1\uc790[{target_index}]"],
+                        },
                         "evidence": {
                             "document_title": doc_title,
                             "acpt_no": acpt_no,
@@ -583,7 +613,7 @@ def _process_bond_issuance(
             acpt = disc.get("acpt_no")
             if acpt:
                 filtered_map[acpt] = disc
-    records = parsed_data.get("records", [])
+    records = _current_parsed_records(parsed_data)
 
     for rec in records:
         acpt_no = rec.get("acpt_no")
@@ -748,7 +778,7 @@ def _process_bond_issuance(
             )
 
         # Extract Investors
-        for target_name, target_amount in _record_pair_rows(rec, "\ud22c\uc790\uc790"):
+        for target_index, (target_name, target_amount) in enumerate(_record_pair_rows(rec, "\ud22c\uc790\uc790")):
             target_name = target_name.strip()
             if not target_name or target_name == "-":
                 continue
@@ -813,6 +843,15 @@ def _process_bond_issuance(
                     properties={
                         "acpt_no": acpt_no,
                         "amount": amount_val,
+                        "parser_mode": "bond_issuance",
+                        "issuer_id": company_node_id,
+                        "provenance": {
+                            "fact_id": f"fact:bond_issuance:{acpt_no}:investor:{target_index}",
+                            "parser_mode": "bond_issuance",
+                            "acpt_no": acpt_no,
+                            "template_id": "bond_investor_v1",
+                            "field_refs": [f"\ud22c\uc790\uc790[{target_index}]"],
+                        },
                         "evidence": {
                             "document_title": doc_title,
                             "acpt_no": acpt_no,
@@ -1079,7 +1118,7 @@ def _process_shareholder_parsed_details(
         "@reporting_company": "company",
         "@meeting": "meeting",
     }
-    for relationship in relationships:
+    for relationship_index, relationship in enumerate(relationships):
         if not isinstance(relationship, dict):
             continue
         relationship_type = str(relationship.get("relationship_type") or "").strip().lower()
@@ -1170,7 +1209,16 @@ def _process_shareholder_parsed_details(
                 properties={
                     **attributes,
                     "acpt_no": acpt_no,
+                    "reporting_company_id": company_node_id,
                     "disclosure_phase": disclosure_phase,
+                    "parser_mode": "shareholder_meeting",
+                    "provenance": {
+                        "fact_id": f"fact:shareholder_meeting:{acpt_no}:relationship:{relationship_index}",
+                        "parser_mode": "shareholder_meeting",
+                        "acpt_no": acpt_no,
+                        "template_id": "shareholder_relation_v1",
+                        "field_refs": [f"relationships[{relationship_index}]"],
+                    },
                     "evidence": _shareholder_evidence(
                         document_title=document_title,
                         acpt_no=acpt_no,
@@ -1378,6 +1426,8 @@ def export_ontology_to_web_json(
     edges: List[GraphEdge],
     output_path: str | Path,
     metadata: Dict[str, Any] | None = None,
+    *,
+    document_format: str = "finiq_disclosure_graph_v1",
 ) -> None:
     """Export ontology nodes and edges to flat, web-friendly JSON format with metadata."""
     web_nodes = []
@@ -1445,7 +1495,7 @@ def export_ontology_to_web_json(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     out_data = {
-        "format": "finiq_disclosure_graph_v1",
+        "format": document_format,
         "metadata": without_path_metadata(metadata or {}),
         "nodes": without_path_metadata(web_nodes),
         "edges": without_path_metadata(web_edges)

@@ -302,7 +302,7 @@ def test_build_ontology_graph(tmp_path: Path):
     assert len(director_edges) == 1
     assert director_edges[0].source_id == "person_026178_강감찬"
     assert director_edges[0].target_id == "company_026178"
-    
+
     # 6. Export to Web JSON
     out_web_json = tmp_path / "web_ontology.json"
     export_ontology_to_web_json(nodes, edges, out_web_json, metadata)
@@ -502,6 +502,73 @@ def test_build_ontology_graph_skips_null_pair_rows(tmp_path: Path):
     assert "company_005930" in nodes
     assert all(edge.edge_type != EdgeTypes.ACQUIRED for edge in edges)
     assert all(edge.edge_type != EdgeTypes.FOR_PURPOSE for edge in edges)
+
+
+def test_ontology_graph_uses_only_current_correction_record(tmp_path: Path) -> None:
+    rights_parsed = tmp_path / "parsed-rights.json"
+    rights_filtered = tmp_path / "filtered-rights.json"
+    rights_parsed.write_text(
+        json.dumps(
+            {
+                "records": [
+                    {
+                        "acpt_no": "20260101000001",
+                        "family_id": "rights-family-1",
+                        "current_sequence": 0,
+                        "family_member_count": 2,
+                        "증자유형": "유상증자",
+                        "신주의 종류와 수": [["보통주식", 100]],
+                        "발행가액": [["보통주식", 1000]],
+                        "발행대상자": [["정정투자자", 100]],
+                    },
+                    {
+                        "acpt_no": "20260102000001",
+                        "family_id": "rights-family-1",
+                        "current_sequence": 1,
+                        "family_member_count": 2,
+                        "증자유형": "유상증자",
+                        "신주의 종류와 수": [["보통주식", 200]],
+                        "발행가액": [["보통주식", 1000]],
+                        "발행대상자": [["정정투자자", 200]],
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    rights_filtered.write_text(
+        json.dumps(
+            {
+                "disclosures": [
+                    {
+                        "acpt_no": "20260101000001",
+                        "company_id": "111111",
+                        "company_name": "정정회사",
+                        "disclosed_date": "2026-01-01",
+                    },
+                    {
+                        "acpt_no": "20260102000001",
+                        "company_id": "111111",
+                        "company_name": "정정회사",
+                        "disclosed_date": "2026-01-02",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    nodes, edges, _ = build_ontology_graph(
+        rights_issuance_path=rights_parsed,
+        rights_filtered_path=rights_filtered,
+    )
+    acquired_edges = [edge for edge in edges if edge.edge_type == EdgeTypes.ACQUIRED]
+
+    assert len(acquired_edges) == 1
+    assert acquired_edges[0].weight == 200
+    assert acquired_edges[0].properties["acpt_no"] == "20260102000001"
 
 
 def test_shareholder_meeting_rejects_alternate_filtered_fields(tmp_path):

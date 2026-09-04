@@ -12,6 +12,7 @@ from finiq.data.ontology_builder import (
     build_ontology_graph,
     export_ontology_to_web_json,
 )
+from finiq.data.graph_models import EdgeTypes, GraphEdge, GraphNode
 from finiq.market_desk.web.features.disclosure_workflow.layout import (
     resolve_disclosure_workspace,
 )
@@ -19,9 +20,15 @@ from finiq.market_desk.web.features.disclosures.filter_presets import (
     load_completed_filter_workflow_payload,
 )
 
-GRAPH_FORMAT = "finiq_disclosure_graph_v1"
+GRAPH_FORMAT = "finiq_disclosure_graph_v2"
 GRAPH_OUTPUT_DIRECTORY = "09-disclosure-graph"
 GRAPH_OUTPUT_FILENAME = "disclosure-graph.json"
+
+_AGENDA_RELATION_TYPES = {
+    EdgeTypes.SUBJECT_OF,
+    EdgeTypes.ACQUISITION_TARGET_OF,
+    EdgeTypes.DIVESTMENT_TARGET_OF,
+}
 
 
 def _workspace_root(body: dict[str, Any]) -> Path:
@@ -110,6 +117,48 @@ def _persisted_graph_path_key(value: object, *, location: str = "graph") -> str 
     return None
 
 
+def _project_entity_relationships(
+    nodes: dict[str, GraphNode],
+    edges: list[GraphEdge],
+) -> tuple[dict[str, GraphNode], list[GraphEdge]]:
+    """Keep entity nodes and project disclosure-local targets onto their company."""
+    entity_nodes = {
+        node_id: node
+        for node_id, node in nodes.items()
+        if "Entity" in node.labels
+    }
+    entity_edges: list[GraphEdge] = []
+
+    for edge in edges:
+        if edge.source_id not in entity_nodes:
+            continue
+        if edge.target_id in entity_nodes:
+            entity_edges.append(edge)
+            continue
+
+        target_company_id = None
+        if edge.edge_type == EdgeTypes.ACQUIRED:
+            target_company_id = edge.properties.get("issuer_id")
+        elif edge.edge_type in _AGENDA_RELATION_TYPES:
+            target_company_id = edge.properties.get("reporting_company_id")
+
+        if target_company_id not in entity_nodes:
+            continue
+        entity_edges.append(
+            edge.model_copy(
+                update={
+                    "target_id": target_company_id,
+                    "properties": {
+                        **edge.properties,
+                        "disclosure_target_id": edge.target_id,
+                    },
+                }
+            )
+        )
+
+    return entity_nodes, entity_edges
+
+
 def build_disclosure_graph_payload(body: dict[str, Any]) -> dict[str, Any]:
     """Build and atomically save the stage 09 graph document."""
     data_root = _workspace_root(body)
@@ -122,6 +171,9 @@ def build_disclosure_graph_payload(body: dict[str, Any]) -> dict[str, Any]:
         shareholder_meeting_parsed_path=sources["shareholder_meeting_parsed"],
         shareholder_meeting_filtered_path=sources["shareholder_meeting_filtered"],
     )
+    nodes, edges = _project_entity_relationships(nodes, edges)
+    metadata["total_nodes"] = len(nodes)
+    metadata["total_edges"] = len(edges)
 
     output_path = _graph_output_path(data_root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -129,13 +181,19 @@ def build_disclosure_graph_payload(body: dict[str, Any]) -> dict[str, Any]:
         f".{output_path.name}.part-{uuid.uuid4().hex}"
     )
     try:
-        export_ontology_to_web_json(nodes, edges, temporary_path, metadata)
+        export_ontology_to_web_json(
+            nodes,
+            edges,
+            temporary_path,
+            metadata,
+            document_format=GRAPH_FORMAT,
+        )
         os.replace(temporary_path, output_path)
     finally:
         temporary_path.unlink(missing_ok=True)
 
     return {
-        "format": "finiq_disclosure_graph_build_v1",
+        "format": "finiq_disclosure_graph_build_v2",
         "output_path": str(output_path),
         "source_modes": source_modes,
         "total_nodes": len(nodes),

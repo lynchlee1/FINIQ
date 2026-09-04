@@ -37,6 +37,12 @@ function graphNodeId(prefix: string, value: string) {
   return `${prefix}:${value.replace(/[^a-zA-Z0-9가-힣_-]+/g, "-") || "unknown"}`;
 }
 
+function formatGraphProperty(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "object") return JSON.stringify(value, null, 2);
+  return String(value);
+}
+
 function buildOntologyGraphData(
   company: OntologyCompany | null,
   panel: OntologyPanel | null,
@@ -491,6 +497,14 @@ export function OntologyNodeGraph({ selectedCompany, panel, selectedCompanyLabel
                       <dt className="text-xs text-slate-500">weight</dt>
                       <dd className="ontology-mono-wrap mt-0.5 font-semibold text-slate-200">{selectedEdge.weight}</dd>
                     </div>
+                    {Object.entries(selectedEdge.properties).map(([key, value]) => (
+                      <div key={key}>
+                        <dt className="text-xs text-slate-500">{key}</dt>
+                        <dd className="ontology-mono-wrap mt-0.5 whitespace-pre-wrap font-semibold text-slate-200">
+                          {formatGraphProperty(value)}
+                        </dd>
+                      </div>
+                    ))}
                   </dl>
                   <Button type="button" variant="destructive" size="sm" onClick={() => handleDeleteSelectedEdge(selectedEdge.id)}>
                     엣지 삭제

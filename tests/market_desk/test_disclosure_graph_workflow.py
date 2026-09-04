@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from finiq.data.graph_models import Agenda, Company, EdgeTypes, GraphEdge, Person
 from finiq.market_desk.web.app import app
 from finiq.market_desk.web.features.disclosures.disclosure_graph import (
+    _project_entity_relationships,
     build_disclosure_graph_payload,
     load_disclosure_graph_payload,
 )
@@ -70,7 +72,7 @@ def test_build_disclosure_graph_payload_writes_stage_09_graph(tmp_path: Path) ->
 
     output_path = tmp_path / "09-disclosure-graph" / "disclosure-graph.json"
     assert result == {
-        "format": "finiq_disclosure_graph_build_v1",
+        "format": "finiq_disclosure_graph_build_v2",
         "output_path": str(output_path),
         "source_modes": ["rights_issuance"],
         "total_nodes": result["total_nodes"],
@@ -80,10 +82,29 @@ def test_build_disclosure_graph_payload_writes_stage_09_graph(tmp_path: Path) ->
     assert result["total_edges"] > 0
 
     saved = json.loads(output_path.read_text(encoding="utf-8"))
-    assert saved["format"] == "finiq_disclosure_graph_v1"
+    assert saved["format"] == "finiq_disclosure_graph_v2"
     assert saved["metadata"]["total_nodes"] == result["total_nodes"]
     assert saved["nodes"]
     assert saved["edges"]
+    assert {node["type"] for node in saved["nodes"]} <= {
+        "Company",
+        "Person",
+        "Organization",
+    }
+    node_ids = {node["id"] for node in saved["nodes"]}
+    assert all(
+        edge["source"] in node_ids and edge["target"] in node_ids
+        for edge in saved["edges"]
+    )
+    acquired_edge = next(
+        edge for edge in saved["edges"] if edge["relation"] == "ACQUIRED"
+    )
+    assert acquired_edge["source"] == "org_테스트투자자"
+    assert acquired_edge["target"] == "company_005930"
+    assert acquired_edge["properties"]["evidence"]["acpt_no"] == "20260430001640"
+    assert acquired_edge["properties"]["disclosure_target_id"].startswith("security_")
+    assert "statements" not in saved
+    assert "entity_analysis" not in saved
 
     def path_keys(value: object) -> list[str]:
         if isinstance(value, dict):
@@ -105,6 +126,30 @@ def test_build_disclosure_graph_payload_writes_stage_09_graph(tmp_path: Path) ->
         return []
 
     assert path_keys(saved) == []
+
+
+def test_entity_projection_maps_agenda_relationship_to_reporting_company() -> None:
+    nodes = {
+        "company_1": Company(id="company_1", name="보고회사"),
+        "person_1": Person(id="person_1", name="관계자"),
+        "agenda_1": Agenda(id="agenda_1", title="관계 안건"),
+    }
+    edges = [
+        GraphEdge(
+            id="edge_1",
+            source_id="person_1",
+            target_id="agenda_1",
+            edge_type=EdgeTypes.SUBJECT_OF,
+            properties={"reporting_company_id": "company_1"},
+        )
+    ]
+
+    entity_nodes, entity_edges = _project_entity_relationships(nodes, edges)
+
+    assert set(entity_nodes) == {"company_1", "person_1"}
+    assert len(entity_edges) == 1
+    assert entity_edges[0].target_id == "company_1"
+    assert entity_edges[0].properties["disclosure_target_id"] == "agenda_1"
 
 
 def test_build_disclosure_graph_reads_linked_filter_and_converted_stages(
@@ -176,9 +221,30 @@ def test_load_disclosure_graph_payload_returns_saved_document(tmp_path: Path) ->
 
     payload = load_disclosure_graph_payload({"data_root": str(tmp_path)})
 
-    assert payload["format"] == "finiq_disclosure_graph_v1"
+    assert payload["format"] == "finiq_disclosure_graph_v2"
     assert payload["nodes"]
     assert payload["edges"]
+
+
+def test_project_example_workspace_contains_only_entity_relationships() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+
+    payload = load_disclosure_graph_payload(
+        {"data_root": str(project_root / "examples" / "disclosure-graph-workspace")}
+    )
+
+    assert payload["metadata"]["sample"] is True
+    assert {node["type"] for node in payload["nodes"]} <= {
+        "Company",
+        "Person",
+        "Organization",
+    }
+    node_ids = {node["id"] for node in payload["nodes"]}
+    assert all(
+        edge["source"] in node_ids and edge["target"] in node_ids
+        for edge in payload["edges"]
+    )
+    assert all(edge["properties"].get("evidence") for edge in payload["edges"])
 
 
 def test_load_disclosure_graph_payload_rejects_legacy_path_metadata(
@@ -209,4 +275,4 @@ def test_disclosure_graph_routes_use_workspace_contract(tmp_path: Path) -> None:
     assert build_response.status_code == 200
     assert build_response.json()["source_modes"] == ["rights_issuance"]
     assert load_response.status_code == 200
-    assert load_response.json()["format"] == "finiq_disclosure_graph_v1"
+    assert load_response.json()["format"] == "finiq_disclosure_graph_v2"
